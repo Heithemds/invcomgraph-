@@ -1,499 +1,477 @@
-
-// =====================
-// CONFIG SUPABASE
-// =====================
+/* =========================
+   CONFIG — À REMPLACER
+========================= */
 const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* =========================
+   INIT
+========================= */
+let sb = null;
+try {
+  if (!window.supabase?.createClient) throw new Error("Supabase SDK non chargé");
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (e) {
+  alert("Supabase init failed: " + e.message);
+}
 
-// =====================
-// UI HELPERS
-// =====================
 const $ = (id) => document.getElementById(id);
 
-const toastEl = $("toast");
-function toast(msg, type="ok"){
-  toastEl.textContent = msg;
-  toastEl.className = `toast show ${type}`;
-  clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(()=> toastEl.className="toast", 2600);
-}
-
-function setDiag(msg){
-  $("diagBox").textContent = msg;
-}
-
-function onlyDigits6(s){
-  return (s || "").replace(/\D/g,"").slice(0,6);
-}
-
-function normalizeRef(ref){
-  // règle: I = 1
-  let r = (ref || "").trim().toUpperCase();
-  r = r.replace(/I/g, "1");
-  return r;
-}
-
-function intOrNull(v){
-  if(v === null || v === undefined) return null;
-  const s = String(v).trim();
-  if(s === "") return null;
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) ? n : null;
-}
-
-async function sha256Hex(text){
-  const enc = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,"0")).join("");
-}
-// -----------------------------
-// OCR PHOTO (Tesseract.js)
-// -----------------------------
-const photoInput = document.getElementById("photoInput");
-const btnScanPhoto = document.getElementById("btnScanPhoto");
-const scanStatus = document.getElementById("scanStatus");
-
-// Champs à remplir (adapte les IDs à tes inputs existants)
-const fDesignation = document.getElementById("designation");
-const fRef        = document.getElementById("ref");
-const fGrammage   = document.getElementById("grammage");
-const fCouleur    = document.getElementById("couleur");
-const fManches    = document.querySelector('input[name="manches"]'); // ou ton select/boutons
-
-// Tailles (adapte si tes IDs sont différents)
-const sizeIds = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
-
-function normalizeText(t) {
-  return (t || "")
-    .replace(/\r/g, "\n")
-    .replace(/[“”]/g, '"')
-    .replace(/[’]/g, "'")
-    .replace(/\s+\n/g, "\n")
-    .replace(/\n\s+/g, "\n")
-    .trim();
-}
-
-// règle métier : "I" = "1"
-function normalizeRef(ref) {
-  if (!ref) return "";
-  let r = ref.toUpperCase().replace(/\s+/g, "");
-  r = r.replace(/I/g, "1"); // <--- ta règle
-  return r;
-}
-
-function pickLineAfter(label, lines) {
-  const idx = lines.findIndex(l => l.toUpperCase().includes(label));
-  if (idx >= 0 && lines[idx + 1]) return lines[idx + 1].trim();
-  return "";
-}
-
-function extractFieldsFromOCR(raw) {
-  const text = normalizeText(raw);
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-
-  // Heuristique : on essaye "ligne après le libellé"
-  let designation = pickLineAfter("DESIGNATION", lines);
-  let ref = pickLineAfter("REFERENCE", lines);
-  let grammage = pickLineAfter("GRAMMAGE", lines);
-  let couleur = pickLineAfter("COULEUR", lines);
-  let manches = pickLineAfter("MANCHES", lines);
-
-  // secours : chercher patterns usuels
-  if (!ref) {
-    const m = text.toUpperCase().match(/\b([A-Z]\s*[\dI]{2,4})\b/); // ex E191, E19I
-    if (m) ref = m[1];
-  }
-
-  // Grammage : nombre 120..300 typiquement
-  if (!grammage) {
-    const g = text.match(/\b(1[0-9]{2}|2[0-9]{2}|300)\b/);
-    if (g) grammage = g[1];
-  }
-
-  // Manches : MC ou ML
-  if (!manches) {
-    const s = text.toUpperCase().match(/\b(MC|ML)\b/);
-    if (s) manches = s[1];
-  }
-
-  // Tailles : on récupère quantités comme "L 50", "XL 13"
-  const tailles = {};
-  for (const sz of sizeIds) tailles[sz] = "";
-
-  // Pattern robuste : (TAILLE) puis (nombre)
-  // ex: "L 50", "XL 13"
-  const re = new RegExp(`\\b(${sizeIds.map(s=>s.replace("3","3")).join("|")})\\b\\s*[:\\-]?\\s*(\\d{1,3})\\b`, "gi");
-  let mm;
-  while ((mm = re.exec(text)) !== null) {
-    const taille = mm[1].toUpperCase();
-    const qte = mm[2];
-    tailles[taille] = qte;
-  }
-
-  return {
-    designation,
-    ref: normalizeRef(ref),
-    grammage,
-    couleur,
-    manches: (manches || "").toUpperCase(),
-    tailles
-  };
-}
-
-async function runOCR(file) {
-  scanStatus.textContent = "OCR en cours…";
-  const { data } = await Tesseract.recognize(file, "eng", {
-    logger: (m) => {
-      if (m.status === "recognizing text") {
-        scanStatus.textContent = `OCR… ${Math.round(m.progress * 100)}%`;
-      }
-    }
-  });
-  return data.text;
-}
-
-function fillFormFromExtract(ex) {
-  if (fDesignation && ex.designation) fDesignation.value = ex.designation;
-  if (fRef && ex.ref) fRef.value = ex.ref;
-  if (fGrammage && ex.grammage) fGrammage.value = ex.grammage;
-  if (fCouleur && ex.couleur) fCouleur.value = ex.couleur;
-
-  // manches MC/ML : adapte selon ton UI
-  if (ex.manches === "MC" || ex.manches === "ML") {
-    // si tu as un input texte :
-    if (fManches) fManches.value = ex.manches;
-    // si tu as des boutons radio :
-    const radio = document.querySelector(`input[name="manches"][value="${ex.manches}"]`);
-    if (radio) radio.checked = true;
-  }
-
-  // tailles
-  for (const sz of sizeIds) {
-    const el = document.getElementById(`q_${sz}`); // ex: q_L, q_XL...
-    if (el && ex.tailles[sz] !== "") el.value = ex.tailles[sz];
-  }
-}
-
-btnScanPhoto?.addEventListener("click", async () => {
-  try {
-    const file = photoInput?.files?.[0];
-    if (!file) {
-      scanStatus.textContent = "Sélectionne une photo d’abord.";
-      return;
-    }
-
-    const raw = await runOCR(file);
-    const ex = extractFieldsFromOCR(raw);
-
-    fillFormFromExtract(ex);
-    scanStatus.textContent = "Scan terminé ✅ (vérifie rapidement avant Valider).";
-  } catch (e) {
-    console.error(e);
-    scanStatus.textContent = "Erreur OCR. Essaie avec une photo plus nette, bien cadrée.";
-  }
-});
-// =====================
-// SESSION LOCAL (appareil)
-// =====================
-const LS_KEY = "inv_atelier_session_v1"; // { name }
-function getSession(){
-  try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }catch{ return null; }
-}
-function setSession(sess){
-  localStorage.setItem(LS_KEY, JSON.stringify(sess));
-  refreshSessionUI();
-}
-function clearSession(){
-  localStorage.removeItem(LS_KEY);
-  refreshSessionUI();
-}
-
-// =====================
-// UI ELEMENTS
-// =====================
 const authCard = $("authCard");
-const entryCard = $("entryCard");
-const whoami = $("whoami");
-const sessionPill = $("sessionPill");
-const btnLogout = $("btnLogout");
+const appCard  = $("appCard");
 
 const authName = $("authName");
-const authPin = $("authPin");
-const authPin2 = $("authPin2");
-const confirmWrap = $("confirmWrap");
+const authPin  = $("authPin");
 const btnRegister = $("btnRegister");
 const btnLogin = $("btnLogin");
+const authMsg = $("authMsg");
 
-// Entry fields
+const whoami = $("whoami");
+const btnLogout = $("btnLogout");
+
+const btnOpenCamera = $("btnOpenCamera");
+const photoInput = $("photoInput");
+const btnClear = $("btnClear");
+const btnSubmit = $("btnSubmit");
+
+const scanStatus = $("scanStatus");
+const saveMsg = $("saveMsg");
+
 const designation = $("designation");
 const grammage = $("grammage");
 const ref = $("ref");
 const couleur = $("couleur");
-const cartonCode = $("cartonCode");
+const carton_code = $("carton_code");
+const manchesHidden = $("manches");
+const totalCarton = $("totalCarton");
 
-const mMC = $("mMC");
-const mML = $("mML");
+const segBtns = Array.from(document.querySelectorAll(".segbtn"));
+const sizeInputs = Array.from(document.querySelectorAll('input[data-size]'));
 
-const btnCalc = $("btnCalc");
-const btnSubmit = $("btnSubmit");
-const btnReset = $("btnReset");
-const totalEl = $("total");
-const sizesGrid = $("sizesGrid");
-
-// Sizes list (ajoute si besoin)
 const SIZES = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
 
-let selectedManches = "MC";
+/* =========================
+   HELPERS
+========================= */
+function setMsg(el, text, kind = "") {
+  el.textContent = text || "";
+  el.classList.remove("ok","err");
+  if (kind) el.classList.add(kind);
+}
+function normName(n) {
+  return (n || "").trim();
+}
+function normPin(p) {
+  return (p || "").replace(/\D/g,"").slice(0,6);
+}
+function normalizeIas1(s) {
+  // règle demandée: I = 1
+  return (s || "").replace(/I/g, "1").replace(/l/g, "1");
+}
+function onlyDigits(s) {
+  return (s || "").replace(/\D/g,"");
+}
+function toIntSafe(v) {
+  const n = parseInt((v||"").toString().replace(/[^\d]/g,""), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+function computeTotal() {
+  const t = sizeInputs.reduce((acc, inp) => acc + toIntSafe(inp.value), 0);
+  totalCarton.textContent = String(t);
+}
+sizeInputs.forEach(i => i.addEventListener("input", computeTotal));
 
-// =====================
-// BUILD SIZES GRID
-// =====================
-const sizeInputs = {};
-function buildSizes(){
-  sizesGrid.innerHTML = "";
-  SIZES.forEach(sz=>{
-    const wrap = document.createElement("div");
-    wrap.className = "sizeItem";
-    wrap.innerHTML = `
-      <div class="sizeTag">${sz}</div>
-      <input inputmode="numeric" placeholder="0" data-size="${sz}" />
-    `;
-    const inp = wrap.querySelector("input");
-    inp.addEventListener("input", ()=>{
-      inp.value = (inp.value || "").replace(/[^\d]/g,"");
-      calcTotal();
-    });
-    sizeInputs[sz] = inp;
-    sizesGrid.appendChild(wrap);
+segBtns.forEach(b=>{
+  b.addEventListener("click", ()=>{
+    segBtns.forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    manchesHidden.value = b.dataset.manches;
   });
-}
-buildSizes();
-
-// =====================
-// MANCHES SWITCH
-// =====================
-function setManches(v){
-  selectedManches = v;
-  mMC.classList.toggle("active", v==="MC");
-  mML.classList.toggle("active", v==="ML");
-}
-mMC.addEventListener("click", ()=> setManches("MC"));
-mML.addEventListener("click", ()=> setManches("ML"));
-setManches("MC");
-
-// =====================
-// TOTAL
-// =====================
-function calcTotal(){
-  let sum = 0;
-  for(const sz of SIZES){
-    const n = intOrNull(sizeInputs[sz].value);
-    if(Number.isFinite(n)) sum += n;
-  }
-  totalEl.textContent = String(sum);
-  return sum;
-}
-btnCalc.addEventListener("click", ()=>{
-  const t = calcTotal();
-  toast(`Total calculé : ${t}`, "ok");
 });
+// default active MC
+segBtns.find(b=>b.dataset.manches==="MC")?.classList.add("active");
 
-// =====================
-// AUTH: REGISTER / LOGIN
-// =====================
-authPin.addEventListener("input", ()=> authPin.value = onlyDigits6(authPin.value));
-authPin2.addEventListener("input", ()=> authPin2.value = onlyDigits6(authPin2.value));
+async function sha256(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
 
-btnRegister.addEventListener("click", async ()=>{
-  try{
-    const name = (authName.value || "").trim();
-    const pin = onlyDigits6(authPin.value);
-    const pin2 = onlyDigits6(authPin2.value);
+function setSession(user) {
+  localStorage.setItem("inv_user", JSON.stringify(user));
+}
+function getSession() {
+  try { return JSON.parse(localStorage.getItem("inv_user")||"null"); }
+  catch { return null; }
+}
+function clearSession() {
+  localStorage.removeItem("inv_user");
+}
 
-    if(!name) return toast("Nom obligatoire.", "bad");
-    if(pin.length !== 6) return toast("PIN doit faire 6 chiffres.", "bad");
+/* =========================
+   UI STATE
+========================= */
+function showApp(userName) {
+  authCard.classList.add("hidden");
+  appCard.classList.remove("hidden");
+  whoami.classList.remove("hidden");
+  btnLogout.classList.remove("hidden");
+  whoami.textContent = "👤 " + userName;
+}
+function showAuth() {
+  authCard.classList.remove("hidden");
+  appCard.classList.add("hidden");
+  whoami.classList.add("hidden");
+  btnLogout.classList.add("hidden");
+}
 
-    // afficher champ confirmation si pas visible
-    confirmWrap.style.display = "block";
-    if(pin2.length !== 6) return toast("Confirme le PIN (6 chiffres).", "bad");
-    if(pin !== pin2) return toast("PIN et confirmation ne correspondent pas.", "bad");
+/* =========================
+   AUTH: REGISTER & LOGIN
+========================= */
+async function registerUser() {
+  setMsg(authMsg, "", "");
+  const name = normName(authName.value);
+  const pin = normPin(authPin.value);
 
-    const pin_hash = await sha256Hex(`${name.toLowerCase()}::${pin}`);
+  if (!name) return setMsg(authMsg, "Nom obligatoire.", "err");
+  if (pin.length !== 6) return setMsg(authMsg, "PIN doit être 6 chiffres.", "err");
 
-    // vérifier si existe déjà
-    const { data: existing, error: e1 } = await supabase
-      .from("app_users")
-      .select("id,name")
-      .eq("name", name)
-      .maybeSingle();
+  btnRegister.disabled = true;
+  btnLogin.disabled = true;
 
-    if(e1) throw e1;
-    if(existing) return toast("Ce nom existe déjà. Utilise Se connecter.", "bad");
-
-    const { error: e2 } = await supabase
-      .from("app_users")
-      .insert([{ name, pin_hash }]);
-
-    if(e2) throw e2;
-
-    setSession({ name });
-    toast("Utilisateur créé. Connecté.", "ok");
-  }catch(err){
-    setDiag(String(err?.message || err));
-    toast(`Erreur inscription: ${err?.message || err}`, "bad");
-  }
-});
-
-btnLogin.addEventListener("click", async ()=>{
-  try{
-    const name = (authName.value || "").trim();
-    const pin = onlyDigits6(authPin.value);
-
-    confirmWrap.style.display = "none";
-    authPin2.value = "";
-
-    if(!name) return toast("Nom obligatoire.", "bad");
-    if(pin.length !== 6) return toast("PIN doit faire 6 chiffres.", "bad");
-
-    const pin_hash = await sha256Hex(`${name.toLowerCase()}::${pin}`);
-
-    const { data, error } = await supabase
+  try {
+    // check exists
+    const { data: exists, error: e1 } = await sb
       .from("app_users")
       .select("id,name,pin_hash")
       .eq("name", name)
       .maybeSingle();
 
-    if(error) throw error;
-    if(!data) return toast("Nom inconnu. Fais S’inscrire.", "bad");
+    if (e1) throw e1;
+    if (exists) return setMsg(authMsg, "Ce nom existe déjà. Utilise 'Connecter'.", "err");
 
-    if(data.pin_hash !== pin_hash){
-      return toast("PIN incorrect.", "bad");
+    const pin_hash = await sha256(pin);
+
+    const { data, error } = await sb
+      .from("app_users")
+      .insert([{ name, pin_hash }])
+      .select("id,name")
+      .single();
+
+    if (error) throw error;
+
+    setSession({ id: data.id, name: data.name });
+    setMsg(authMsg, "Compte créé. Connexion OK.", "ok");
+    showApp(data.name);
+  } catch (e) {
+    setMsg(authMsg, "Erreur inscription: " + (e.message || e.toString()), "err");
+  } finally {
+    btnRegister.disabled = false;
+    btnLogin.disabled = false;
+  }
+}
+
+async function loginUser() {
+  setMsg(authMsg, "", "");
+  const name = normName(authName.value);
+  const pin = normPin(authPin.value);
+
+  if (!name) return setMsg(authMsg, "Nom obligatoire.", "err");
+  if (pin.length !== 6) return setMsg(authMsg, "PIN doit être 6 chiffres.", "err");
+
+  btnRegister.disabled = true;
+  btnLogin.disabled = true;
+
+  try {
+    const { data, error } = await sb
+      .from("app_users")
+      .select("id,name,pin_hash")
+      .eq("name", name)
+      .single();
+
+    if (error) throw error;
+
+    const pin_hash = await sha256(pin);
+    if (pin_hash !== data.pin_hash) {
+      return setMsg(authMsg, "PIN incorrect.", "err");
     }
 
-    setSession({ name });
-    toast("Connexion OK.", "ok");
-  }catch(err){
-    setDiag(String(err?.message || err));
-    toast(`Erreur connexion: ${err?.message || err}`, "bad");
+    setSession({ id: data.id, name: data.name });
+    setMsg(authMsg, "Connexion OK.", "ok");
+    showApp(data.name);
+  } catch (e) {
+    setMsg(authMsg, "Erreur connexion: " + (e.message || e.toString()), "err");
+  } finally {
+    btnRegister.disabled = false;
+    btnLogin.disabled = false;
   }
-});
+}
+
+btnRegister.addEventListener("click", registerUser);
+btnLogin.addEventListener("click", loginUser);
 
 btnLogout.addEventListener("click", ()=>{
   clearSession();
-  toast("Déconnecté.", "ok");
+  showAuth();
+  setMsg(authMsg, "Déconnecté.", "");
 });
 
-// =====================
-// RESET CARTON
-// =====================
-function resetCarton(){
+/* =========================
+   CLEAR FORM
+========================= */
+function clearForm() {
   designation.value = "";
   grammage.value = "";
   ref.value = "";
   couleur.value = "";
-  cartonCode.value = "";
-  setManches("MC");
-  for(const sz of SIZES) sizeInputs[sz].value = "";
-  calcTotal();
+  carton_code.value = "";
+  manchesHidden.value = "MC";
+  segBtns.forEach(x=>x.classList.remove("active"));
+  segBtns.find(b=>b.dataset.manches==="MC")?.classList.add("active");
+  sizeInputs.forEach(i=>i.value = "");
+  computeTotal();
+  setMsg(scanStatus, "");
+  setMsg(saveMsg, "");
 }
-btnReset.addEventListener("click", ()=>{
-  resetCarton();
-  toast("Nouveau carton prêt.", "ok");
+btnClear.addEventListener("click", clearForm);
+
+/* =========================
+   CAMERA / PHOTO SCAN (OCR)
+========================= */
+btnOpenCamera.addEventListener("click", ()=>{
+  // ouvre la prise de photo
+  photoInput.click();
 });
 
-// Auto normalize ref as user types
-ref.addEventListener("input", ()=>{
-  const pos = ref.selectionStart;
-  const before = ref.value;
-  const after = normalizeRef(before);
-  if(after !== before){
-    ref.value = after;
-    ref.setSelectionRange(pos, pos);
+photoInput.addEventListener("change", async (e)=>{
+  const file = e.target.files?.[0];
+  if (!file) return;
+  await scanLabelFromImage(file);
+  // reset input to allow scanning same photo again
+  photoInput.value = "";
+});
+
+async function scanLabelFromImage(file) {
+  setMsg(scanStatus, "Scan en cours... (OCR)", "");
+  try {
+    if (!window.Tesseract) throw new Error("Tesseract non chargé");
+
+    const { data: { text } } = await window.Tesseract.recognize(file, "eng+fra", {
+      logger: m => {
+        if (m.status === "recognizing text") {
+          setMsg(scanStatus, `Scan OCR... ${Math.round((m.progress||0)*100)}%`, "");
+        }
+      }
+    });
+
+    const cleaned = cleanupOCR(text);
+    setMsg(scanStatus, "Scan OK. Vérifie/corrige puis Valider & Envoyer.", "ok");
+
+    const parsed = parseLabel(cleaned);
+
+    // apply
+    if (parsed.designation) designation.value = parsed.designation;
+    if (parsed.grammage) grammage.value = parsed.grammage;
+    if (parsed.ref) ref.value = parsed.ref;
+    if (parsed.couleur) couleur.value = parsed.couleur;
+    if (parsed.manches) {
+      manchesHidden.value = parsed.manches;
+      segBtns.forEach(x=>x.classList.toggle("active", x.dataset.manches===parsed.manches));
+    }
+
+    // sizes
+    for (const s of SIZES) {
+      const inp = sizeInputs.find(i=>i.dataset.size===s);
+      if (inp && parsed.tailles[s] != null) inp.value = String(parsed.tailles[s]);
+    }
+    computeTotal();
+  } catch (e) {
+    setMsg(scanStatus, "Erreur scan: " + (e.message || e.toString()), "err");
   }
-});
+}
 
-// =====================
-// SUBMIT CARTON => inventory_counts (central)
-// =====================
-btnSubmit.addEventListener("click", async ()=>{
-  try{
-    const sess = getSession();
-    if(!sess?.name) return toast("Connecte-toi d’abord.", "bad");
+function cleanupOCR(t) {
+  let s = (t || "").replace(/\r/g,"\n");
+  // normalise
+  s = s.replace(/[ ]{2,}/g," ");
+  s = s.replace(/\n{2,}/g,"\n");
+  // règle I=1 sur zones chiffrées sera appliquée au parsing
+  return s.trim();
+}
 
-    const payload = {
-      designation: (designation.value || "").trim() || null,
-      grammage: intOrNull(grammage.value),
-      ref: normalizeRef(ref.value),
-      couleur: (couleur.value || "").trim() || null,
-      manches: selectedManches,
-      carton_code: (cartonCode.value || "").trim() || null,
-      counted_by: sess.name,
-      tailles_json: {}
-    };
+function parseLabel(text) {
+  // Heuristique robuste pour ton étiquette
+  // On cherche mots clés + lignes proches.
+  const lines = text.split("\n").map(l=>l.trim()).filter(Boolean);
 
-    if(!payload.ref) return toast("Référence obligatoire.", "bad");
-    // tailles_json: seulement tailles saisies
-    let hasQty = false;
-    for(const sz of SIZES){
-      const n = intOrNull(sizeInputs[sz].value);
-      if(Number.isFinite(n) && n > 0){
-        payload.tailles_json[sz] = n;
-        hasQty = true;
+  const out = {
+    designation: "",
+    grammage: "",
+    ref: "",
+    couleur: "",
+    manches: "",
+    tailles: {}
+  };
+
+  // helper to find line index containing keyword
+  const findIdx = (kw) => lines.findIndex(l => l.toUpperCase().includes(kw));
+
+  // DESIGNATION
+  {
+    const i = findIdx("DESIGNATION");
+    if (i >= 0) out.designation = (lines[i+1] || "").slice(0,40);
+  }
+
+  // GRAMMAGE
+  {
+    const i = findIdx("GRAMMAGE");
+    if (i >= 0) {
+      const cand = normalizeIas1(lines[i+1] || "");
+      const g = onlyDigits(cand);
+      if (g) out.grammage = g;
+    }
+  }
+
+  // REFERENCE
+  {
+    const i = findIdx("RÉFÉRENCE") >= 0 ? findIdx("RÉFÉRENCE") : findIdx("REFERENCE");
+    if (i >= 0) {
+      let cand = normalizeIas1(lines[i+1] || "");
+      cand = cand.replace(/\s/g,"").toUpperCase();
+      // garde alphanum
+      cand = cand.replace(/[^A-Z0-9]/g,"");
+      if (cand) out.ref = cand;
+    } else {
+      // fallback: cherche pattern type E191
+      const p = lines.map(l=>normalizeIas1(l).toUpperCase().replace(/\s/g,""));
+      const hit = p.find(l=>/^[A-Z]{1,3}\d{2,5}$/.test(l));
+      if (hit) out.ref = hit;
+    }
+  }
+
+  // COULEUR
+  {
+    const i = findIdx("COULEUR");
+    if (i >= 0) {
+      // parfois la ligne contient déjà la valeur
+      const next = lines[i+1] || "";
+      out.couleur = next.replace(/^[:\- ]+/,"").slice(0,40);
+    }
+  }
+
+  // MANCHES
+  {
+    // cherche MC/ML
+    const blob = lines.join(" ").toUpperCase();
+    if (/\bML\b/.test(blob)) out.manches = "ML";
+    else if (/\bMC\b/.test(blob)) out.manches = "MC";
+  }
+
+  // QUANTITES PAR TAILLE
+  // OCR peut sortir: "L 50 XL 13" etc.
+  {
+    const blob = normalizeIas1(lines.join(" ").toUpperCase());
+    const sizePatterns = [
+      ["XS", /\bXS\b\s*([0-9]{1,4})/],
+      ["S",  /\bS\b\s*([0-9]{1,4})/],
+      ["M",  /\bM\b\s*([0-9]{1,4})/],
+      ["L",  /\bL\b\s*([0-9]{1,4})/],
+      ["XL", /\bXL\b\s*([0-9]{1,4})/],
+      ["XXL",/\bXXL\b\s*([0-9]{1,4})/],
+      ["3XL",/\b3XL\b\s*([0-9]{1,4})/],
+      ["4XL",/\b4XL\b\s*([0-9]{1,4})/],
+      ["5XL",/\b5XL\b\s*([0-9]{1,4})/],
+      ["6XL",/\b6XL\b\s*([0-9]{1,4})/],
+      ["7XL",/\b7XL\b\s*([0-9]{1,4})/],
+      ["8XL",/\b8XL\b\s*([0-9]{1,4})/],
+    ];
+    for (const [s, re] of sizePatterns) {
+      const m = blob.match(re);
+      if (m) out.tailles[s] = parseInt(m[1],10);
+    }
+
+    // fallback: cherche couples "TAILLE nombre" sur lignes
+    for (const l of lines) {
+      const L = normalizeIas1(l.toUpperCase());
+      for (const s of SIZES) {
+        const re = new RegExp(`\\b${s}\\b\\s*([0-9]{1,4})`);
+        const m = L.match(re);
+        if (m) out.tailles[s] = parseInt(m[1],10);
       }
     }
-    if(!hasQty) return toast("Saisis au moins une quantité.", "bad");
+  }
 
-    // total calcul (info)
-    const total = calcTotal();
+  // cleanup final
+  out.designation = (out.designation||"").trim();
+  out.couleur = (out.couleur||"").trim();
+  out.ref = (out.ref||"").trim();
 
-    const { error } = await supabase
-      .from("inventory_counts")
-      .insert([payload]);
+  return out;
+}
 
-    if(error) throw error;
+/* =========================
+   SAVE COUNT (CENTRAL DB)
+========================= */
+btnSubmit.addEventListener("click", async ()=>{
+  setMsg(saveMsg, "", "");
+  const sess = getSession();
+  if (!sess?.name) return setMsg(saveMsg, "Pas connecté.", "err");
 
-    toast(`Envoyé ✅ Total ${total}`, "ok");
-    resetCarton();
-  }catch(err){
-    setDiag(String(err?.message || err));
-    toast(`Erreur envoi: ${err?.message || err}`, "bad");
+  // Validate fields minimal
+  const d = designation.value.trim();
+  const g = onlyDigits(normalizeIas1(grammage.value));
+  const r = normalizeIas1(ref.value).replace(/\s/g,"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  const c = couleur.value.trim();
+  const m = (manchesHidden.value === "ML") ? "ML" : "MC";
+  const cc = carton_code.value.trim();
+
+  if (!r) return setMsg(saveMsg, "Référence obligatoire.", "err");
+  if (!c) return setMsg(saveMsg, "Couleur obligatoire.", "err");
+
+  // tailles_json
+  const tailles = {};
+  for (const inp of sizeInputs) {
+    const s = inp.dataset.size;
+    const v = toIntSafe(inp.value);
+    if (v > 0) tailles[s] = v; // on n’envoie que les tailles présentes
+  }
+
+  const total = Object.values(tailles).reduce((a,b)=>a+b,0);
+
+  if (total <= 0) return setMsg(saveMsg, "Quantités vides. Mets au moins une taille.", "err");
+
+  btnSubmit.disabled = true;
+  try {
+    const payload = {
+      carton_code: cc || null,
+      designation: d || null,
+      grammage: g || null,
+      ref: r,
+      couleur: c,
+      manches: m,
+      tailles_json: tailles,
+      total_carton: total,
+      counted_by: sess.name
+    };
+
+    const { error } = await sb.from("inventory_counts").insert([payload]);
+    if (error) throw error;
+
+    setMsg(saveMsg, "Enregistré ✅ (base centralisée).", "ok");
+    clearForm();
+  } catch (e) {
+    setMsg(saveMsg, "Erreur enregistrement: " + (e.message || e.toString()), "err");
+  } finally {
+    btnSubmit.disabled = false;
   }
 });
 
-// =====================
-// SESSION UI
-// =====================
-function refreshSessionUI(){
+/* =========================
+   BOOT
+========================= */
+(function boot(){
+  computeTotal();
   const sess = getSession();
-  const on = !!sess?.name;
-
-  authCard.style.display = on ? "none" : "block";
-  entryCard.style.display = on ? "block" : "none";
-
-  btnLogout.disabled = !on;
-  sessionPill.textContent = on ? `Connecté: ${sess.name}` : "Hors connexion";
-  whoami.textContent = on ? sess.name : "";
-
-  if(!on){
-    // garder confirm caché par défaut
-    confirmWrap.style.display = "none";
-    authPin2.value = "";
-  }
-}
-refreshSessionUI();
-
-// =====================
-// DIAGNOSTIC CONNECTIVITY
-// =====================
-(async function boot(){
-  try{
-    const { error } = await supabase.from("app_users").select("id").limit(1);
-    if(error) throw error;
-    setDiag("Supabase OK. Tables accessibles.");
-  }catch(err){
-    setDiag("Supabase KO: " + (err?.message || err));
-    toast("Supabase non accessible (clé/URL/politiques).", "bad");
-  }
+  if (sess?.name) showApp(sess.name);
+  else showAuth();
 })();
