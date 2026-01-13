@@ -1,20 +1,150 @@
-create or replace view public.stock_total as
-with expanded as (
-  select
-    ref,
-    couleur,
-    manches,
-    e.key as taille,
-    (e.value)::int as qte
-  from public.inventory i
-  cross join jsonb_each(i.tailles_json) as e
-)
-select
-  ref,
-  couleur,
-  manches,
-  taille,
-  sum(qte) as qte_total
-from expanded
-group by ref, couleur, manches, taille
-order by ref, couleur, manches, taille;
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inventaire Atelier</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div class="title">
+          <h1>Inventaire Textile — Atelier</h1>
+          <div class="sub">Saisie rapide • Base centralisée • Historique local</div>
+        </div>
+      </div>
+
+      <div class="status-pill" id="netPill">
+        <span class="dot" id="netDot"></span>
+        <span id="netTxt">Connexion…</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- FORM -->
+      <section class="card">
+        <div class="head">
+          <div class="h">Saisie Carton</div>
+          <div class="badge" id="whoBadge">Non connecté</div>
+        </div>
+
+        <div class="body">
+          <div class="row">
+            <div>
+              <label>Compte par (nom)</label>
+              <select id="comptePar">
+                <option value="">— Choisir —</option>
+                <option>Maeva</option>
+                <option>Aurélien</option>
+                <option>Astrid</option>
+                <option>Brenda</option>
+                <option>Youri</option>
+                <option value="__other__">Autre…</option>
+              </select>
+
+              <div id="otherNameWrap" class="mt10 hidden">
+                <input id="otherName" placeholder="Saisir le nom" />
+              </div>
+            </div>
+
+            <div>
+              <label>Carton code (unique)</label>
+              <input id="cartonCode" placeholder="ex: C-001" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Désignation</label>
+              <input id="designation" placeholder="ex: TSHIRT / POLO / CHEMISE" />
+            </div>
+            <div>
+              <label>Grammage</label>
+              <input id="grammage" inputmode="numeric" placeholder="ex: 190" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Référence</label>
+              <input id="ref" placeholder="ex: E191" />
+            </div>
+            <div>
+              <label>Couleur (nom long)</label>
+              <input id="couleur" placeholder="ex: Dark Grey / Urban Orange" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Manches</label>
+              <div class="toggle">
+                <button type="button" class="btn-toggle" id="btnMC">MC</button>
+                <button type="button" class="btn-toggle" id="btnML">ML</button>
+              </div>
+            </div>
+
+            <div>
+              <label>Remarque</label>
+              <input id="remarque" placeholder="optionnel" />
+            </div>
+          </div>
+
+          <section class="card inner">
+            <div class="head">
+              <div class="h">Quantités par taille</div>
+              <div class="badge">Marqueur épais OK</div>
+            </div>
+
+            <div class="body">
+              <div class="sizes" id="sizesGrid"></div>
+              <div class="note">Vide = 0. Total calculé automatiquement.</div>
+            </div>
+
+            <div class="total">
+              <div>
+                <div class="meta">Total carton</div>
+                <div class="big" id="totalBig">0</div>
+              </div>
+              <div class="badge" id="manchesBadge">MANCHES: —</div>
+            </div>
+          </section>
+
+          <div class="actions">
+            <button class="btn primary" id="btnSend">Valider & Envoyer</button>
+            <button class="btn secondary" id="btnClear">Reset</button>
+            <button class="btn danger" id="btnLogout">Changer Nom</button>
+          </div>
+
+          <div class="note">
+            Les photos ne sont pas stockées. Envoi: <b>inventory</b> (Supabase).
+          </div>
+        </div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="card">
+        <div class="head">
+          <div class="h">Historique (appareil)</div>
+          <div class="badge" id="histCount">0</div>
+        </div>
+        <ul class="history" id="historyList"></ul>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast">
+    <div class="ico" id="toastIco"></div>
+    <div>
+      <div class="t" id="toastTitle">Info</div>
+      <div class="m" id="toastMsg">…</div>
+    </div>
+  </div>
+
+  <!-- App -->
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
