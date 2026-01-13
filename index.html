@@ -2,225 +2,188 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Inventaire Atelier</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">📦</div>
-      <div>
-        <div class="title">Inventaire Atelier</div>
-        <div class="subtitle">Saisie rapide • Base centralisée • Totaux automatiques</div>
+      <div class="brand__mark">⚡</div>
+      <div class="brand__text">
+        <div class="brand__title">Inventaire Atelier</div>
+        <div class="brand__subtitle">Saisie rapide • Base centralisée • Totaux automatiques</div>
       </div>
     </div>
 
-    <div class="userbox">
-      <div id="userBadge" class="badge hidden"></div>
-      <button id="btnLogout" class="btn ghost hidden">Déconnexion</button>
+    <div class="topbar__actions">
+      <div class="pill" id="sessionPill">Non connecté</div>
+      <button class="btn btn--ghost" id="logoutBtn" type="button" disabled>Déconnexion</button>
     </div>
   </header>
 
   <main class="container">
-
-    <!-- LOGIN -->
-    <section id="viewLogin" class="card">
-      <h2>Connexion</h2>
-      <p class="muted">Nom + PIN (6 chiffres). Si le nom n’existe pas, l’app le crée.</p>
-
-      <div class="grid2">
-        <div class="field">
-          <label>Nom</label>
-          <input id="loginName" type="text" placeholder="Ex: Maeva" autocomplete="off" />
+    <section class="grid">
+      <!-- LOGIN -->
+      <section class="card" id="loginCard">
+        <div class="card__head">
+          <h2>Connexion</h2>
+          <p>Nom + PIN (6 chiffres). Si le nom n’existe pas, l’app le crée.</p>
         </div>
-        <div class="field">
-          <label>PIN (6 chiffres)</label>
-          <input id="loginPin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••" />
-        </div>
-      </div>
 
-      <div class="row">
-        <button id="btnLogin" class="btn primary">Entrer</button>
-        <div id="loginMsg" class="msg"></div>
-      </div>
+        <form id="loginForm" class="form">
+          <div class="row">
+            <div class="field">
+              <label for="name">Nom</label>
+              <input id="name" name="name" type="text" placeholder="Ex: Maeva" autocomplete="off" required />
+            </div>
+            <div class="field">
+              <label for="pin">PIN (6 chiffres)</label>
+              <input id="pin" name="pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••" required />
+            </div>
+          </div>
 
-      <div class="divider"></div>
+          <div class="row row--end">
+            <button class="btn btn--primary" type="submit">Entrer</button>
+          </div>
 
-      <details>
-        <summary>⚙️ Diagnostics rapides</summary>
-        <div class="muted small">
-          Si GitHub Pages charge mais rien ne s’enregistre : vérifier URL + anon key dans <code>app.js</code>.
-        </div>
-      </details>
-    </section>
+          <div class="hint">
+            <span class="dot"></span>
+            Astuce atelier : le PIN sert juste à éviter les erreurs de nom, pas à faire de la banque.
+          </div>
+        </form>
+      </section>
 
-    <!-- APP -->
-    <section id="viewApp" class="hidden">
-
-      <section class="card">
-        <div class="cardHead">
+      <!-- SAISIE -->
+      <section class="card" id="entryCard">
+        <div class="card__head">
           <h2>Saisie carton</h2>
-          <div class="hint">Astuce : écris gros au marqueur, l’app doit être plus rapide que ton stylo.</div>
+          <p>Écris gros au marqueur : l’app doit être plus rapide que ton stylo.</p>
         </div>
 
-        <div class="grid3">
-          <div class="field">
-            <label>Désignation</label>
-            <input id="f_designation" type="text" placeholder="Tshirt / Polo / Chemise..." />
-          </div>
-          <div class="field">
-            <label>Référence</label>
-            <input id="f_ref" type="text" placeholder="E191" />
-          </div>
-          <div class="field">
-            <label>Grammage</label>
-            <input id="f_grammage" type="text" placeholder="190" />
-          </div>
-        </div>
-
-        <div class="grid3">
-          <div class="field">
-            <label>Couleur</label>
-            <input id="f_couleur" type="text" placeholder="Dark Grey / Urban Orange..." />
-          </div>
-          <div class="field">
-            <label>Manches</label>
-            <div class="seg">
-              <button class="segBtn" data-manches="MC" id="btnMC">MC</button>
-              <button class="segBtn" data-manches="ML" id="btnML">ML</button>
+        <form id="entryForm" class="form">
+          <div class="row">
+            <div class="field">
+              <label for="designation">Désignation</label>
+              <input id="designation" name="designation" type="text" placeholder="Tshirt / Polo / Chemise…" autocomplete="off" />
             </div>
-            <div class="muted small">Règle : seulement MC ou ML.</div>
-          </div>
-          <div class="field">
-            <label>Code carton (optionnel)</label>
-            <input id="f_carton" type="text" placeholder="Ex: A12-03" />
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <h3>Quantités par taille</h3>
-        <p class="muted small">Tu peux laisser vide les tailles non présentes. Marqueur épais OK.</p>
-
-        <div class="sizes">
-          <div class="sizeRow">
-            <div class="size">
-              <span>XS</span><input id="q_xs" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>S</span><input id="q_s" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>M</span><input id="q_m" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>L</span><input id="q_l" inputmode="numeric" placeholder="0" />
+            <div class="field">
+              <label for="grammage">Grammage</label>
+              <input id="grammage" name="grammage" type="number" inputmode="numeric" placeholder="190" />
             </div>
           </div>
 
-          <div class="sizeRow">
-            <div class="size">
-              <span>XL</span><input id="q_xl" inputmode="numeric" placeholder="0" />
+          <div class="row">
+            <div class="field field--wide">
+              <label for="ref">Référence</label>
+              <input id="ref" name="ref" type="text" placeholder="E191" autocomplete="off" required />
+              <div class="micro">Règle: on accepte “I” comme “1” (ex: 19I → 191).</div>
             </div>
-            <div class="size">
-              <span>XXL</span><input id="q_xxl" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>3XL</span><input id="q_3xl" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>4XL</span><input id="q_4xl" inputmode="numeric" placeholder="0" />
+            <div class="field field--wide">
+              <label for="couleur">Couleur (nom long)</label>
+              <input id="couleur" name="couleur" type="text" placeholder="Dark Grey / Urban Orange…" autocomplete="off" />
             </div>
           </div>
 
-          <div class="sizeRow">
-            <div class="size">
-              <span>5XL</span><input id="q_5xl" inputmode="numeric" placeholder="0" />
+          <div class="row">
+            <div class="field">
+              <label>Manches</label>
+              <div class="seg">
+                <button type="button" class="seg__btn" data-sleeve="MC">MC</button>
+                <button type="button" class="seg__btn" data-sleeve="ML">ML</button>
+              </div>
+              <input id="manches" name="manches" type="hidden" required />
+              <div class="micro">Obligatoire : MC ou ML.</div>
             </div>
-            <div class="size">
-              <span>6XL</span><input id="q_6xl" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>7XL</span><input id="q_7xl" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="size">
-              <span>8XL</span><input id="q_8xl" inputmode="numeric" placeholder="0" />
+
+            <div class="field">
+              <label for="carton_code">Code carton (optionnel)</label>
+              <input id="carton_code" name="carton_code" type="text" placeholder="Ex: A12-03" autocomplete="off" />
             </div>
           </div>
-        </div>
 
-        <div class="divider"></div>
+          <div class="divider"></div>
 
-        <div class="row">
-          <button id="btnCalcTotal" class="btn">Calcul total</button>
-          <div class="totalBox">
-            <span>Total carton</span>
-            <strong id="totalCarton">0</strong>
+          <div class="sizesHead">
+            <h3>Quantités par taille</h3>
+            <div class="sizesHead__meta">Laisse vide les tailles absentes. “0” accepté.</div>
           </div>
-          <button id="btnSave" class="btn primary">Valider & Envoyer</button>
-        </div>
 
-        <div id="saveMsg" class="msg"></div>
+          <div class="sizesGrid" id="sizesGrid"></div>
+
+          <div class="row row--between">
+            <div class="totalBox">
+              <div class="totalBox__label">Total carton</div>
+              <div class="totalBox__value" id="totalCarton">0</div>
+            </div>
+
+            <div class="actions">
+              <button class="btn btn--ghost" type="button" id="calcBtn">Calcul total</button>
+              <button class="btn btn--primary" type="submit" id="sendBtn">Valider & Envoyer</button>
+            </div>
+          </div>
+
+          <div class="status" id="statusLine"></div>
+        </form>
       </section>
 
-      <section class="card">
-        <div class="cardHead">
-          <h2>Stock total (vue)</h2>
-          <div class="hint">Source : <code>stock_total</code> (somme automatique par ref/couleur/manches/taille)</div>
+      <!-- HISTO LOCAL + STOCK -->
+      <section class="card" id="sideCard">
+        <div class="tabs">
+          <button class="tab tab--active" data-tab="history" type="button">Historique (local)</button>
+          <button class="tab" data-tab="stock" type="button">Stock total</button>
         </div>
 
-        <div class="grid3">
-          <div class="field">
-            <label>Recherche REF</label>
-            <input id="filterRef" type="text" placeholder="Ex: E191" />
+        <div class="tabPanel tabPanel--active" id="tab-history">
+          <div class="card__head card__head--tight">
+            <h2>Derniers cartons saisis</h2>
+            <p>Enregistrés sur cet appareil (rapide). Le “counted_by” est en base.</p>
           </div>
-          <div class="field">
-            <label>Couleur</label>
-            <input id="filterCouleur" type="text" placeholder="Ex: Dark Grey" />
-          </div>
-          <div class="field">
-            <label>Manches</label>
-            <select id="filterManches">
-              <option value="">Toutes</option>
-              <option value="MC">MC</option>
-              <option value="ML">ML</option>
-            </select>
-          </div>
+          <div class="list" id="historyList"></div>
         </div>
 
-        <div class="row">
-          <button id="btnRefresh" class="btn">Actualiser</button>
-          <button id="btnExportCsv" class="btn ghost">Exporter CSV</button>
-          <div id="stockMsg" class="msg"></div>
-        </div>
+        <div class="tabPanel" id="tab-stock">
+          <div class="card__head card__head--tight">
+            <h2>Stock total (lecture)</h2>
+            <p>Somme par ref / couleur / manches / taille.</p>
+          </div>
 
-        <div class="tableWrap">
-          <table class="table" id="stockTable">
-            <thead>
-              <tr>
-                <th>REF</th>
-                <th>Couleur</th>
-                <th>Manches</th>
-                <th>Taille</th>
-                <th>Qte</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="row">
+            <div class="field field--wide">
+              <label for="stockFilter">Filtre</label>
+              <input id="stockFilter" type="text" placeholder="Ex: E191 ou Dark Grey…" autocomplete="off" />
+            </div>
+            <div class="field field--compact">
+              <label>&nbsp;</label>
+              <button class="btn btn--ghost" id="refreshStockBtn" type="button">Actualiser</button>
+            </div>
+          </div>
+
+          <div class="tableWrap">
+            <table class="table" id="stockTable">
+              <thead>
+                <tr>
+                  <th>REF</th>
+                  <th>Couleur</th>
+                  <th>Manches</th>
+                  <th>Taille</th>
+                  <th>Qté</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="micro" id="stockMeta"></div>
         </div>
       </section>
-
     </section>
-
   </main>
 
-  <footer class="footer">
-    <span>Inventaire • v1</span>
-    <span class="muted">Pas de photos stockées • Envoi direct en base</span>
-  </footer>
+  <div class="toast" id="toast"></div>
 
+  <!-- Supabase JS (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
