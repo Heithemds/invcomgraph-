@@ -234,6 +234,216 @@ function clearForm() {
   setMsg(saveMsg, "");
 }
 btnClear.addEventListener("click", clearForm);
+// =========================
+// OCR PAR ZONES (ROI)
+// =========================
+
+// Ajuste ces zones UNE FOIS en testant avec ta vraie étiquette.
+// x,y,w,h sont en % de l'image CAPTURÉE (0..1).
+// IMPORTANT : ça suppose que l'étiquette est bien alignée dans le cadre.
+const ROI = {
+  designation: { x: 0.18, y: 0.20, w: 0.70, h: 0.10 },
+  reference:   { x: 0.18, y: 0.32, w: 0.70, h: 0.10 },
+  couleur:     { x: 0.18, y: 0.43, w: 0.70, h: 0.10 },
+  grammage:    { x: 0.70, y: 0.20, w: 0.22, h: 0.10 }, // si grammage est petit à droite, adapte
+  manches:     { x: 0.70, y: 0.54, w: 0.22, h: 0.08 }  // MC/ML zone
+};
+
+// --- UI refs
+const statusEl = document.getElementById("status");
+const btnOpenScanner = document.getElementById("btnOpenScanner");
+const btnCloseScanner = document.getElementById("btnCloseScanner");
+const scannerModal = document.getElementById("scannerModal");
+const btnCapture = document.getElementById("btnCapture");
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const fields = {
+  designation: document.getElementById("designation"),
+  grammage: document.getElementById("grammage"),
+  reference: document.getElementById("reference"),
+  couleur: document.getElementById("couleur"),
+  manches: document.getElementById("manches"),
+};
+
+// Manche chips
+document.querySelectorAll(".chip").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".chip").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    fields.manches.value = btn.dataset.manches;
+  });
+});
+
+// --- Camera handling
+let stream = null;
+
+btnOpenScanner.addEventListener("click", async () => {
+  try {
+    scannerModal.classList.remove("hidden");
+    await startCamera();
+  } catch (e) {
+    alert("Caméra impossible: " + e.message);
+    scannerModal.classList.add("hidden");
+  }
+});
+
+btnCloseScanner.addEventListener("click", async () => {
+  await stopCamera();
+  scannerModal.classList.add("hidden");
+});
+
+async function startCamera() {
+  // arrière si dispo
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: "environment" } },
+    audio: false
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+async function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  if (video) video.srcObject = null;
+}
+
+// --- OCR process
+btnCapture.addEventListener("click", async () => {
+  try {
+    setStatus("Capture…", "info");
+    captureFrameToCanvas();
+
+    setStatus("OCR en cours… (10–20s selon téléphone)", "info");
+    const results = await ocrAllZones(canvas);
+
+    // Remplissage + nettoyage métier
+    fields.designation.value = cleanText(results.designation);
+    fields.reference.value   = cleanRef(results.reference);
+    fields.couleur.value     = cleanText(results.couleur);
+    fields.grammage.value    = cleanDigits(results.grammage);
+
+    const m = cleanManches(results.manches);
+    if (m) {
+      fields.manches.value = m;
+      document.querySelectorAll(".chip").forEach(b => {
+        b.classList.toggle("active", b.dataset.manches === m);
+      });
+    }
+
+    setStatus("Scan OK. Vérifie/corrige puis Valider & Envoyer.", "ok");
+    await stopCamera();
+    scannerModal.classList.add("hidden");
+  } catch (e) {
+    console.error(e);
+    setStatus("Scan KO: " + e.message, "err");
+    alert("Scan KO: " + e.message);
+  }
+});
+
+function captureFrameToCanvas() {
+  const w = video.videoWidth;
+  const h = video.videoHeight;
+
+  // IMPORTANT : on capture toute l'image.
+  // Le cadrage “cadre guide” est visuel. Pour plus robuste, on recadrera au cadre (phase 2).
+  canvas.width = w;
+  canvas.height = h;
+  ctx.drawImage(video, 0, 0, w, h);
+}
+
+async function ocrAllZones(sourceCanvas) {
+  const out = {};
+  for (const [key, r] of Object.entries(ROI)) {
+    const crop = cropCanvas(sourceCanvas, r);
+    // Option: binarisation simple pour améliorer l'OCR
+    const prep = preprocessForOCR(crop);
+
+    const text = await runTesseract(prep);
+    out[key] = text;
+  }
+  return out;
+}
+
+function cropCanvas(src, r) {
+  const c = document.createElement("canvas");
+  const w = Math.round(src.width * r.w);
+  const h = Math.round(src.height * r.h);
+  const x = Math.round(src.width * r.x);
+  const y = Math.round(src.height * r.y);
+
+  c.width = w; c.height = h;
+  const cctx = c.getContext("2d");
+  cctx.drawImage(src, x, y, w, h, 0, 0, w, h);
+  return c;
+}
+
+function preprocessForOCR(c) {
+  const w = c.width, h = c.height;
+  const cctx = c.getContext("2d");
+  const img = cctx.getImageData(0, 0, w, h);
+  const d = img.data;
+
+  // Grayscale + léger contraste + seuillage simple
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114);
+    // contraste
+    const g = Math.max(0, Math.min(255, (gray - 128) * 1.2 + 128));
+    const bin = g > 150 ? 255 : 0; // seuil (à ajuster)
+    d[i] = d[i+1] = d[i+2] = bin;
+  }
+  cctx.putImageData(img, 0, 0);
+  return c;
+}
+
+async function runTesseract(canvasEl) {
+  const { data } = await Tesseract.recognize(canvasEl, "eng+fra", {
+    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_/.",
+  });
+  return (data.text || "").trim();
+}
+
+// --- Nettoyages métier
+function cleanText(t) {
+  return (t || "")
+    .replace(/\s+/g, " ")
+    .replace(/[|]/g, "I")
+    .trim();
+}
+
+function cleanDigits(t) {
+  const m = (t || "").match(/\d+/g);
+  return m ? m.join("") : "";
+}
+
+function cleanRef(t) {
+  // Réf en MAJ + enlève espaces parasites
+  return cleanText(t).toUpperCase().replace(/\s/g, "");
+}
+
+function cleanManches(t) {
+  const s = cleanText(t).toUpperCase();
+  if (s.includes("ML")) return "ML";
+  if (s.includes("MC")) return "MC";
+  return "";
+}
+
+function setStatus(msg, type) {
+  statusEl.textContent = msg;
+  statusEl.style.borderColor =
+    type === "ok" ? "rgba(37,211,102,.55)" :
+    type === "err" ? "rgba(255,90,90,.55)" :
+    "rgba(255,255,255,.14)";
+  statusEl.style.color =
+    type === "ok" ? "#c9ffe0" :
+    type === "err" ? "#ffd0d0" :
+    "var(--muted)";
+}
 
 /* =========================
    CAMERA / PHOTO SCAN (OCR)
