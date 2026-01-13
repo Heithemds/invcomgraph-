@@ -217,3 +217,7 @@ input:focus{
 .toast.show{ display:block; }
 .toast.bad{ border-color: rgba(255,107,107,.35); }
 .toast.ok{ border-color: rgba(124,255,214,.35); }
+.card { padding:16px; border-radius:16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); margin:12px 0; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.muted { opacity:.8; font-size:.95rem; }
+button { cursor:pointer; }
