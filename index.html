@@ -1,95 +1,116 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Inventaire Atelier – OCR</title>
-  <link rel="stylesheet" href="styles.css"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Inventaire Atelier</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Barre supérieure -->
   <header class="topbar">
     <div class="brand">
       <div class="logo">⚡</div>
-      <div>
+      <div class="text-block">
         <div class="title">Inventaire Atelier</div>
-        <div class="subtitle">OCR par zones • Remplissage auto</div>
+        <div class="subtitle">OCR par zones&nbsp;• Remplissage auto</div>
       </div>
     </div>
-    <div class="actions">
-      <button id="btnOpenScanner" class="btn">📷 Scanner</button>
+    <div class="session">
+      <span id="userBadge" class="badge"></span>
+      <button id="btnLogout" class="btn small" disabled>Déconnexion</button>
     </div>
   </header>
 
-  <main class="container">
-    <section class="card">
-      <div class="cardTitle">Saisie carton (remplie par OCR)</div>
-
-      <div id="status" class="status">Prêt.</div>
-
-      <div class="grid">
-        <label>Designation
-          <input id="designation" placeholder="Tshirt / Polo / Chemise...">
-        </label>
-        <label>Grammage
-          <input id="grammage" inputmode="numeric" placeholder="190">
-        </label>
-        <label>Référence
-          <input id="reference" placeholder="E191">
-        </label>
-        <label>Couleur
-          <input id="couleur" placeholder="Dark Grey">
-        </label>
-
-        <div class="row">
-          <div class="chips">
-            <button type="button" class="chip" data-manches="MC">MC</button>
-            <button type="button" class="chip" data-manches="ML">ML</button>
-          </div>
-          <input id="manches" placeholder="MC ou ML" readonly>
+  <main class="wrapper">
+    <!-- Section Auth -->
+    <section id="authSection" class="card">
+      <h2>Accès / Inscription</h2>
+      <div class="auth-grid">
+        <div class="auth-block">
+          <h3>Inscription</h3>
+          <input id="regName" type="text" placeholder="Nom" />
+          <input id="regPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (6 chiffres)" />
+          <input id="regPin2" type="password" inputmode="numeric" maxlength="6" placeholder="Confirmer PIN" />
+          <button id="btnRegister" class="btn primary">S’inscrire</button>
+        </div>
+        <div class="auth-block">
+          <h3>Connexion</h3>
+          <input id="loginName" type="text" placeholder="Nom" />
+          <input id="loginPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (6 chiffres)" />
+          <button id="btnLogin" class="btn">Se connecter</button>
         </div>
       </div>
-
-      <div class="hint">
-        Astuce : aligne l’étiquette dans le cadre, lumière forte, pas d’ombre.
-      </div>
+      <div id="authMsg" class="message"></div>
     </section>
 
-    <!-- Scanner modal -->
-    <div id="scannerModal" class="modal hidden">
-      <div class="modalContent">
-        <div class="modalHeader">
-          <div class="modalTitle">Scan étiquette</div>
-          <button id="btnCloseScanner" class="btnGhost">✕</button>
-        </div>
-
-        <div class="scannerWrap">
-          <video id="video" playsinline></video>
-          <div class="overlay">
-            <div class="frame"></div>
-            <div class="overlayText">Place l’étiquette dans le cadre</div>
-          </div>
-        </div>
-
-        <div class="modalFooter">
-          <button id="btnCapture" class="btnPrimary">📸 Capturer & OCR</button>
-        </div>
-
-        <canvas id="canvas" class="hidden"></canvas>
+    <!-- Section Appli (saisie) -->
+    <section id="appSection" class="card" style="display:none">
+      <h2>Saisie carton (remplie par OCR)</h2>
+      <!-- Boutons scanner / vider -->
+      <div class="row">
+      <button id="scanBtn" class="btn icon">📷 Scanner</button>
+      <input id="scanInput" type="file" accept="image/*" capture="environment" style="display:none" />
+      <button id="btnClear" class="btn ghost">Vider</button>
       </div>
-    </div>
+      <div id="scanStatus" class="status"></div>
 
+      <!-- Champ formulaire -->
+      <div class="form-grid">
+        <label>Désignation
+          <input id="designation" type="text" placeholder="Tshirt / Polo / Chemise" />
+        </label>
+        <label>Référence
+          <input id="ref" type="text" placeholder="E191" />
+        </label>
+        <label>Grammage
+          <input id="grammage" type="text" inputmode="numeric" placeholder="190" />
+        </label>
+        <label>Couleur
+          <input id="couleur" type="text" placeholder="Dark Grey" />
+        </label>
+        <label>Code carton (optionnel)
+          <input id="cartonCode" type="text" placeholder="A12-03" />
+        </label>
+        <label>Manches
+          <div class="chips">
+            <button id="btnMC" type="button" class="chip selected" data-manches="MC">MC</button>
+            <button id="btnML" type="button" class="chip" data-manches="ML">ML</button>
+            <input id="manches" type="hidden" value="MC" />
+          </div>
+        </label>
+      </div>
+
+      <h3>Quantités par taille</h3>
+      <div class="sizes-grid">
+        <label>XS<input data-size="XS" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>S<input data-size="S" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>M<input data-size="M" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>L<input data-size="L" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>XL<input data-size="XL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>XXL<input data-size="XXL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>3XL<input data-size="3XL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>4XL<input data-size="4XL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>5XL<input data-size="5XL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>6XL<input data-size="6XL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>7XL<input data-size="7XL" type="text" inputmode="numeric" placeholder="0" /></label>
+        <label>8XL<input data-size="8XL" type="text" inputmode="numeric" placeholder="0" /></label>
+      </div>
+
+      <div class="footer">
+        Total carton&nbsp;: <span id="totalCarton">0</span>
+      </div>
+
+      <button id="btnSubmit" class="btn primary">Valider &amp; Envoyer</button>
+      <div id="saveMsg" class="message"></div>
+    </section>
   </main>
 
-  <!-- OCR lib -->
-  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- Librairies externes -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!-- Script application -->
   <script src="app.js"></script>
-<!-- Supabase (OBLIGATOIRE) -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<!-- Tesseract (si tu fais OCR) -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-<!-- Ton app -->
-<script src="./app.js"></script>
 </body>
 </html>
