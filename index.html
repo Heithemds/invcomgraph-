@@ -2,13 +2,12 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Inventaire Atelier</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body>
-  <div class="bg"></div>
 
+<body>
   <header class="topbar">
     <div class="brand">
       <div class="logo">⚡</div>
@@ -17,118 +16,128 @@
         <div class="subtitle">Scan étiquette • Base centralisée • Totaux</div>
       </div>
     </div>
-    <div class="session" id="sessionBox">
-      <span class="pill" id="sessionPill">Hors connexion</span>
-      <button class="btn ghost" id="btnLogout" disabled>Déconnexion</button>
+
+    <div class="top-actions">
+      <div id="whoami" class="chip hidden"></div>
+      <button id="btnLogout" class="btn ghost hidden" type="button">Déconnexion</button>
     </div>
   </header>
 
-  <main class="wrap">
+  <main class="container">
     <!-- AUTH -->
     <section class="card" id="authCard">
       <h1>Accès</h1>
-      <p class="muted">
-        5 personnes, simple et rapide : nom + PIN (6 chiffres).
-      </p>
+      <p class="muted">Choisis <b>Inscrire</b> (nouveau) ou <b>Connecter</b> (existant).</p>
 
       <div class="grid2">
-        <div class="field">
+        <div>
           <label>Nom</label>
-          <input id="authName" placeholder="Ex : Mouna" autocomplete="name" />
+          <input id="authName" type="text" placeholder="Ex : Mouna" autocomplete="name" />
         </div>
-        <div class="field">
+        <div>
           <label>PIN (6 chiffres)</label>
-          <input id="authPin" placeholder="******" inputmode="numeric" maxlength="6" />
+          <input id="authPin" type="password" inputmode="numeric" maxlength="6" placeholder="******" />
         </div>
       </div>
 
-      <div class="field" id="confirmWrap" style="display:none;">
-        <label>Confirmer PIN (6 chiffres)</label>
-        <input id="authPin2" placeholder="******" inputmode="numeric" maxlength="6" />
+      <div class="row">
+        <button id="btnRegister" class="btn primary" type="button">Inscrire</button>
+        <button id="btnLogin" class="btn" type="button">Connecter</button>
       </div>
 
-      <div class="actions">
-        <button class="btn" id="btnRegister">S’inscrire</button>
-        <button class="btn primary" id="btnLogin">Se connecter</button>
-      </div>
-
-      <details class="diag">
-        <summary>Diagnostics rapides</summary>
-        <div class="muted small" id="diagBox">—</div>
-      </details>
+      <div id="authMsg" class="msg"></div>
     </section>
 
-    <!-- SAISIE -->
-    <section class="card" id="entryCard" style="display:none;">
-      <div class="row">
-        <h1>Saisie carton</h1>
-        <div class="muted small">Compté par : <b id="whoami"></b></div>
+    <!-- APP -->
+    <section class="card hidden" id="appCard">
+      <div class="card-head">
+        <h2>Saisie carton</h2>
+        <div class="row">
+          <!-- Bouton caméra -->
+          <button id="btnOpenCamera" class="btn icon" type="button" title="Prendre une photo de l’étiquette">
+            <span class="ico">📷</span>
+            <span>Scanner</span>
+          </button>
+          <input id="photoInput" class="hidden" type="file" accept="image/*" capture="environment" />
+          <button id="btnClear" class="btn ghost" type="button">Vider</button>
+        </div>
       </div>
 
-      <div class="grid2">
-        <div class="field">
+      <p class="muted">
+        Astuce : photo bien à plat, bonne lumière. L’OCR remplit les champs, puis tu corriges si besoin.
+      </p>
+
+      <div id="scanStatus" class="msg"></div>
+
+      <div class="grid3">
+        <div>
           <label>Désignation</label>
-          <input id="designation" placeholder="Tshirt / Polo / Chemise..." />
+          <input id="designation" type="text" placeholder="Tshirt / Polo / Chemise..." />
         </div>
-        <div class="field">
+        <div>
           <label>Grammage</label>
-          <input id="grammage" placeholder="Ex : 190" inputmode="numeric" />
+          <input id="grammage" type="text" inputmode="numeric" placeholder="190" />
         </div>
-
-        <div class="field wide">
-          <label>Référence (I = 1 auto)</label>
-          <input id="ref" placeholder="Ex : E191" />
-          <div class="hint">Règle : si tu écris “I”, l’app convertit en “1”.</div>
+        <div>
+          <label>Référence</label>
+          <input id="ref" type="text" placeholder="E191" />
+          <div class="hint">Règle : I = 1 (ex: 19I → 191)</div>
         </div>
+      </div>
 
-        <div class="field">
+      <div class="grid3">
+        <div>
           <label>Couleur</label>
-          <input id="couleur" placeholder="Dark Grey / Urban Orange..." />
+          <input id="couleur" type="text" placeholder="Dark Grey" />
         </div>
-
-        <div class="field">
+        <div>
           <label>Manches</label>
           <div class="seg">
-            <button class="segbtn" data-m="MC" id="mMC">MC</button>
-            <button class="segbtn" data-m="ML" id="mML">ML</button>
+            <button class="segbtn" data-manches="MC" type="button">MC</button>
+            <button class="segbtn" data-manches="ML" type="button">ML</button>
           </div>
-          <div class="hint">Choisir MC ou ML.</div>
+          <input id="manches" type="hidden" value="MC" />
+          <div class="hint">Seulement MC ou ML</div>
         </div>
-
-        <div class="field">
+        <div>
           <label>Code carton (optionnel)</label>
-          <input id="cartonCode" placeholder="Ex : A12-03" />
+          <input id="carton_code" type="text" placeholder="A12-03" />
         </div>
       </div>
 
-      <h2>Quantités par taille</h2>
-      <p class="muted small">Laisse vide les tailles absentes. Entier uniquement.</p>
+      <hr class="sep" />
 
-      <div class="sizes" id="sizesGrid"></div>
+      <h3>Quantités par taille</h3>
 
-      <div class="row">
-        <button class="btn" id="btnCalc">Calcul total</button>
-        <div class="totalBox">Total carton : <b id="total">0</b></div>
+      <div class="sizes">
+        <div class="size"><label>XS</label><input data-size="XS" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>S</label><input data-size="S" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>M</label><input data-size="M" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>L</label><input data-size="L" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>XL</label><input data-size="XL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>XXL</label><input data-size="XXL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>3XL</label><input data-size="3XL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>4XL</label><input data-size="4XL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>5XL</label><input data-size="5XL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>6XL</label><input data-size="6XL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>7XL</label><input data-size="7XL" type="text" inputmode="numeric" placeholder="0" /></div>
+        <div class="size"><label>8XL</label><input data-size="8XL" type="text" inputmode="numeric" placeholder="0" /></div>
       </div>
 
-      <div class="actions">
-        <button class="btn primary" id="btnSubmit">Valider & Envoyer</button>
-        <button class="btn ghost" id="btnReset">Nouveau carton</button>
+      <div class="footerbar">
+        <div class="total">
+          Total carton : <span id="totalCarton">0</span>
+        </div>
+        <button id="btnSubmit" class="btn primary" type="button">Valider & Envoyer</button>
       </div>
+
+      <div id="saveMsg" class="msg"></div>
     </section>
   </main>
 
-  <div class="toast" id="toast" aria-live="polite"></div>
-
-  <!-- IMPORTANT: module pour que Supabase ESM marche sur GitHub Pages -->
-  <script type="module" src="./app.js"></script>
-<div class="card">
-  <h2>Scan étiquette (photo)</h2>
-
-  <input id="photoInput" type="file" accept="image/*" capture="environment" />
-  <button id="btnScanPhoto" type="button">Scanner la photo</button>
-
-  <div id="scanStatus" class="muted"></div>
-</div>
+  <!-- IMPORTANT: scripts en bas + dans cet ordre -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
