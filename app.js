@@ -1,410 +1,490 @@
-/* ========= CONFIG =========
-   ⚠️ Remplace par TES valeurs.
-   Conseil: rotate la anon key sur Supabase.
-*/
-const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
+/* =========================
+   CONFIG SUPABASE
+========================= */
+const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co"; // <-- ton URL
+const SUPABASE_ANON_KEY = "REPLACE_ME"; // <-- mets ta clé anon ici
 
-const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ========= UI helpers ========= */
+/* =========================
+   UI HELPERS
+========================= */
 const $ = (id) => document.getElementById(id);
-const toast = (msg) => {
-  const t = $("toast");
-  t.textContent = msg;
-  t.classList.add("toast--show");
-  setTimeout(() => t.classList.remove("toast--show"), 1800);
-};
-const setStatus = (msg, kind = "") => {
-  const el = $("statusLine");
-  el.className = "status " + (kind ? `status--${kind}` : "");
-  el.textContent = msg || "";
-};
 
-/* ========= Session local ========= */
-const SESSION_KEY = "inv_session_v1";
-const HISTORY_KEY = "inv_history_v1";
-
-function loadSession() {
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
-  catch { return null; }
-}
-function saveSession(s) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-  renderSession();
-}
-function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
-  renderSession();
-}
-
-function addHistory(entry) {
-  const list = loadHistory();
-  list.unshift(entry);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 20)));
-  renderHistory();
-}
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
-  catch { return []; }
-}
-
-/* ========= Normalisation règles =========
-  - REF : accepte I comme 1 (ex: 19I -> 191)
-  - Uppercase + trim
-*/
-function normalizeRef(v) {
-  if (!v) return "";
-  return String(v).trim().toUpperCase().replace(/I/g, "1");
-}
-function normalizeText(v) {
-  return (v ?? "").toString().trim();
-}
-function normalizeSleeve(v) {
-  const x = (v ?? "").toString().trim().toUpperCase();
-  return (x === "MC" || x === "ML") ? x : "";
-}
-
-/* ========= Tailles ========= */
 const SIZES = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
 
-function buildSizesUI() {
-  const grid = $("sizesGrid");
-  grid.innerHTML = "";
-  for (const s of SIZES) {
-    const cell = document.createElement("div");
-    cell.className = "sizeCell";
-    cell.innerHTML = `
-      <div class="sizeCell__top">
-        <span class="badge">${s}</span>
-        <span class="micro">Qté</span>
-      </div>
-      <input data-size="${s}" inputmode="numeric" type="number" min="0" placeholder="0" />
-    `;
-    grid.appendChild(cell);
-  }
-
-  // navigation clavier (Entrée = next)
-  const inputs = [...grid.querySelectorAll("input[data-size]")];
-  inputs.forEach((inp, idx) => {
-    inp.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const next = inputs[idx + 1];
-        if (next) next.focus();
-        else $("sendBtn").focus();
-      }
-    });
-    inp.addEventListener("input", () => calcTotal());
-  });
+function toast(msg, type="") {
+  const t = $("toast");
+  t.className = "toast " + (type || "");
+  t.textContent = msg;
 }
 
-function getSizesJson() {
+function setOcrProgress(pct, label="") {
+  $("ocrBar").style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  $("ocrStatus").textContent = label || "OCR…";
+}
+
+function normalizeSpaces(s) {
+  return (s || "").replace(/\s+/g, " ").trim();
+}
+
+function onlyDigits(s) {
+  return (s || "").replace(/[^\d]/g, "");
+}
+
+/* =========================
+   RÈGLES MÉTIER
+========================= */
+
+// règle: I -> 1 si contexte numérique (ref, grammage, quantités)
+function ITo1_ifNumericContext(s) {
+  if (!s) return s;
+  return s.replace(/I/g, "1");
+}
+
+function normalizeRef(raw) {
+  // exemples: "E19I" -> "E191"
+  let s = normalizeSpaces(raw).toUpperCase();
+  s = ITo1_ifNumericContext(s);
+  // enlève espaces internes
+  s = s.replace(/\s+/g, "");
+  // garde seulement A-Z0-9
+  s = s.replace(/[^A-Z0-9]/g, "");
+  // format attendu : 1 lettre + 3 chiffres (E191)
+  const m = s.match(/^([A-Z])(\d{3})$/);
+  return m ? (m[1] + m[2]) : s; // si pas conforme, on renvoie quand même pour correction manuelle
+}
+
+function normalizeSleeve(raw) {
+  let s = normalizeSpaces(raw).toUpperCase();
+  s = s.replace(/\s+/g, "");
+  if (s === "MC" || s === "ML") return s;
+  // tolérances OCR
+  if (s === "M C") return "MC";
+  if (s === "M L") return "ML";
+  // si OCR sort un truc proche
+  if (s.includes("MC")) return "MC";
+  if (s.includes("ML")) return "ML";
+  return "";
+}
+
+function normalizeColor(raw) {
+  // on garde la casse “title-ish” mais sans sur-normaliser
+  let s = normalizeSpaces(raw);
+  // fixes OCR fréquents
+  s = s.replace(/Darc?k\s*Grey/i, "Dark Grey");
+  s = s.replace(/Urban\s*Orange/i, "Urban Orange");
+  return s;
+}
+
+function normalizeDesignation(raw) {
+  let s = normalizeSpaces(raw);
+  if (!s) return "";
+  // corrections rapides
+  s = s.replace(/T\s*s\s*h\s*i\s*r\s*t/i, "Tshirt");
+  s = s.replace(/T\s*shirt/i, "Tshirt");
+  return s;
+}
+
+function parseSizesFromText(text) {
+  // essaie de repérer "L 50", "XL 13", etc.
   const out = {};
-  const inputs = document.querySelectorAll("input[data-size]");
-  inputs.forEach((i) => {
-    const size = i.getAttribute("data-size");
-    const val = i.value === "" ? "" : String(Math.max(0, parseInt(i.value, 10) || 0));
-    // on garde "" pour "vide", sinon "nombre"
-    out[size] = val;
-  });
+  SIZES.forEach(k => out[k] = 0);
+
+  const upper = (text || "").toUpperCase();
+  // tolérance: "X L" -> "XL", etc.
+  const cleaned = upper.replace(/\s+/g, " ");
+
+  // patterns: "XL 13" / "XL: 13" / "XL=13"
+  for (const size of SIZES) {
+    const re = new RegExp(`\\b${size.replace("3XL","3XL").replace("4XL","4XL")}\\b\\s*[:=]?\\s*(\\d{1,4})`, "g");
+    let m;
+    while ((m = re.exec(cleaned)) !== null) {
+      out[size] = Math.max(out[size], parseInt(m[1], 10) || 0);
+    }
+  }
+
+  // fallback: certaines écritures collées ex "L50"
+  for (const size of SIZES) {
+    const re2 = new RegExp(`\\b${size}\\s*(\\d{1,4})\\b`, "g");
+    let m2;
+    while ((m2 = re2.exec(cleaned)) !== null) {
+      out[size] = Math.max(out[size], parseInt(m2[1], 10) || 0);
+    }
+  }
+
   return out;
 }
 
-function calcTotal() {
-  const sizes = getSizesJson();
-  let sum = 0;
-  for (const k of Object.keys(sizes)) {
-    const n = parseInt(sizes[k], 10);
-    if (!Number.isNaN(n)) sum += n;
+/* =========================
+   CAM + OCR
+========================= */
+let stream = null;
+
+async function startCamera() {
+  const video = $("video");
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" },
+    audio: false
+  });
+  video.srcObject = stream;
+  await video.play();
+
+  $("btnCapture").disabled = false;
+  $("btnStopCam").disabled = false;
+  toast("Caméra OK. Cadre l’étiquette puis clique Scanner.", "ok");
+}
+
+function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
   }
+  $("video").srcObject = null;
+  $("btnCapture").disabled = true;
+  $("btnStopCam").disabled = true;
+  toast("Caméra arrêtée.", "");
+}
+
+function captureFrame() {
+  // capture temporaire dans canvas (pas d’upload photo)
+  const video = $("video");
+  const canvas = $("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const w = video.videoWidth || 1280;
+  const h = video.videoHeight || 720;
+  canvas.width = w;
+  canvas.height = h;
+
+  ctx.drawImage(video, 0, 0, w, h);
+  return canvas;
+}
+
+async function runOCR(canvas) {
+  setOcrProgress(1, "OCR démarré…");
+
+  const worker = await Tesseract.createWorker("eng"); // eng lit bien lettres/chiffres/couleurs
+  await worker.setParameters({
+    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:-= /"
+  });
+
+  let lastPct = 1;
+  worker.logger = (m) => {
+    if (m.status === "recognizing text") {
+      const pct = Math.round((m.progress || 0) * 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        setOcrProgress(pct, `OCR… ${pct}%`);
+      }
+    }
+  };
+
+  const { data } = await worker.recognize(canvas);
+  await worker.terminate();
+
+  setOcrProgress(100, "OCR terminé.");
+  return data.text || "";
+}
+
+/* =========================
+   EXTRACTION CHAMPS (OCR -> formulaire)
+========================= */
+function extractFieldsFromOcr(ocrText) {
+  const raw = ocrText || "";
+  const lines = raw.split("\n").map(l => normalizeSpaces(l)).filter(Boolean);
+  const up = lines.map(l => l.toUpperCase());
+
+  // Heuristiques simples (V1 rapide)
+  // - ref: cherche pattern lettre + 3 chiffres (avec I possible)
+  // - grammage: nombre 2-3 chiffres, souvent 150-300
+  // - manches: MC/ML
+  // - couleur: ligne “longue” non numérique (ex Dark Grey)
+  // - designation: première ligne “mot” type Tshirt
+
+  let designation = "";
+  let ref = "";
+  let grammage = "";
+  let manches = "";
+  let couleur = "";
+
+  // ref
+  for (const l of lines) {
+    const candidate = normalizeRef(l);
+    if (/^[A-Z]\d{3}$/.test(candidate)) { ref = candidate; break; }
+  }
+
+  // manches
+  for (const l of lines) {
+    const s = normalizeSleeve(l);
+    if (s === "MC" || s === "ML") { manches = s; break; }
+  }
+
+  // grammage
+  // on prend le premier nombre 2-3 chiffres plausible
+  for (const l of lines) {
+    const x = ITo1_ifNumericContext(l);
+    const m = x.match(/\b(1\d{2}|2\d{2}|3\d{2})\b/); // 100-399
+    if (m) { grammage = m[1]; break; }
+  }
+
+  // designation: première ligne “texte” sans trop de chiffres
+  for (const l of lines) {
+    if (!/\d/.test(l) && l.length >= 3 && l.length <= 20) {
+      designation = normalizeDesignation(l);
+      break;
+    }
+  }
+
+  // couleur: ligne qui contient des lettres et espaces, pas trop courte, pas “REFERENCE”
+  for (const l of lines) {
+    const u = l.toUpperCase();
+    if (
+      /[A-Z]/i.test(l) &&
+      !/REFERENCE|RÉF|DESIGNATION|GRAMMAGE|QUANTIT|TAILLE|TOTAL|MANCHES/i.test(u) &&
+      !/^\w\d{3}$/.test(normalizeRef(l)) &&
+      l.length >= 4
+    ) {
+      // évite de prendre "TSHIRT"
+      if (!/^TSHIRT|T-SHIRT|POLO|CHEMISE$/i.test(l)) {
+        couleur = normalizeColor(l);
+        break;
+      }
+    }
+  }
+
+  // tailles
+  const tailles = parseSizesFromText(raw);
+
+  return { designation, ref, grammage, couleur, manches, tailles, raw };
+}
+
+function fillForm(fields) {
+  if (fields.designation) $("designation").value = fields.designation;
+  if (fields.ref) $("ref").value = fields.ref;
+  if (fields.grammage) $("grammage").value = fields.grammage;
+  if (fields.couleur) $("couleur").value = fields.couleur;
+  if (fields.manches) setSleeve(fields.manches);
+
+  // tailles
+  for (const k of SIZES) {
+    const el = document.querySelector(`[data-size="${k}"]`);
+    if (el) el.value = fields.tailles?.[k] ? String(fields.tailles[k]) : "";
+  }
+
+  $("ocrRaw").textContent = fields.raw || "";
+  calcTotal();
+  toast("Champs pré-remplis. Corrige si besoin puis Valider & Envoyer.", "ok");
+}
+
+/* =========================
+   LOGIN SIMPLE (nom + PIN)
+========================= */
+let currentUser = null;
+
+async function loginOrCreate(name, pin) {
+  const n = normalizeSpaces(name);
+  const p = (pin || "").trim();
+
+  if (!n) throw new Error("Nom requis.");
+  if (!/^\d{6}$/.test(p)) throw new Error("PIN doit être 6 chiffres.");
+
+  // cherche user
+  const { data: existing, error: e1 } = await sb
+    .from("app_users")
+    .select("*")
+    .eq("name", n)
+    .limit(1);
+
+  if (e1) throw e1;
+
+  if (existing && existing.length) {
+    const user = existing[0];
+    if (String(user.pin) !== p) throw new Error("PIN incorrect.");
+    return user;
+  }
+
+  // create
+  const { data: created, error: e2 } = await sb
+    .from("app_users")
+    .insert({ name: n, pin: p })
+    .select()
+    .single();
+
+  if (e2) throw e2;
+  return created;
+}
+
+/* =========================
+   DB INSERT INVENTORY
+========================= */
+function readSizesFromUI() {
+  const tailles = {};
+  for (const k of SIZES) {
+    const el = document.querySelector(`[data-size="${k}"]`);
+    let v = (el?.value || "").trim();
+    v = ITo1_ifNumericContext(v);
+    v = onlyDigits(v);
+    tailles[k] = v ? parseInt(v, 10) : 0;
+  }
+  return tailles;
+}
+
+function calcTotal() {
+  const tailles = readSizesFromUI();
+  const sum = Object.values(tailles).reduce((a,b)=>a+(b||0),0);
   $("totalCarton").textContent = String(sum);
   return sum;
 }
 
-/* ========= Manches toggle ========= */
-function initSleeves() {
-  const buttons = document.querySelectorAll(".seg__btn");
-  buttons.forEach((b) => {
-    b.addEventListener("click", () => {
-      buttons.forEach((x) => x.classList.remove("seg__btn--active"));
-      b.classList.add("seg__btn--active");
-      $("manches").value = b.dataset.sleeve;
-    });
-  });
-}
+async function sendToDb() {
+  if (!currentUser) throw new Error("Non connecté.");
 
-/* ========= Tabs ========= */
-function initTabs() {
-  const tabs = document.querySelectorAll(".tab");
-  tabs.forEach((t) => {
-    t.addEventListener("click", () => {
-      tabs.forEach((x) => x.classList.remove("tab--active"));
-      t.classList.add("tab--active");
-      const name = t.dataset.tab;
-      document.querySelectorAll(".tabPanel").forEach((p) => p.classList.remove("tabPanel--active"));
-      $(`tab-${name}`).classList.add("tabPanel--active");
-    });
-  });
-}
-
-/* ========= Render ========= */
-function renderSession() {
-  const s = loadSession();
-  const pill = $("sessionPill");
-  const logout = $("logoutBtn");
-
-  if (!s) {
-    pill.textContent = "Non connecté";
-    logout.disabled = true;
-    $("loginCard").style.opacity = "1";
-    $("entryCard").style.opacity = ".55";
-    $("entryCard").style.pointerEvents = "none";
-    setStatus("Connecte-toi pour saisir.", "");
-    return;
-  }
-
-  pill.textContent = `Connecté : ${s.name}`;
-  logout.disabled = false;
-  $("loginCard").style.opacity = ".75";
-  $("entryCard").style.opacity = "1";
-  $("entryCard").style.pointerEvents = "auto";
-  setStatus(`Prêt. Saisis un carton (compteur: ${s.name}).`, "");
-}
-
-function renderHistory() {
-  const list = loadHistory();
-  const wrap = $("historyList");
-  if (!list.length) {
-    wrap.innerHTML = `<div class="micro">Aucun carton enregistré sur cet appareil pour l’instant.</div>`;
-    return;
-  }
-  wrap.innerHTML = list.map((it) => `
-    <div class="item">
-      <div class="item__top">
-        <div class="item__title">${it.ref} • ${it.couleur || "—"} • ${it.manches || "—"}</div>
-        <div class="micro">${it.total} pcs</div>
-      </div>
-      <div class="item__meta">
-        ${it.when} • par <b>${it.counted_by}</b> ${it.carton_code ? `• carton: ${it.carton_code}` : ""}
-      </div>
-    </div>
-  `).join("");
-}
-
-/* ========= DB calls ========= */
-async function ensureUser(name, pin) {
-  // Table: app_users(name text unique, pin text)
-  // 1) try select
-  const { data: found, error: e1 } = await db
-    .from("app_users")
-    .select("id,name,pin")
-    .eq("name", name)
-    .maybeSingle();
-
-  if (e1) throw e1;
-
-  if (!found) {
-    // create
-    const { data: created, error: e2 } = await db
-      .from("app_users")
-      .insert({ name, pin })
-      .select("id,name,pin")
-      .single();
-    if (e2) throw e2;
-    return created;
-  }
-
-  // check pin
-  if (String(found.pin) !== String(pin)) {
-    throw new Error("PIN incorrect pour ce nom.");
-  }
-  return found;
-}
-
-async function insertCount(payload) {
-  // Table: inventory_counts(...)
-  const { error } = await db.from("inventory_counts").insert(payload);
-  if (error) throw error;
-}
-
-async function loadStockTotals(filterText = "") {
-  // View/table: stock_total(ref, couleur, manches, taille, qte_total)
-  const q = db.from("stock_total").select("ref,couleur,manches,taille,qte_total");
-
-  // simple filter: contains on ref or couleur
-  const f = normalizeText(filterText);
-  let req = q;
-  if (f) {
-    // Supabase OR filter
-    req = req.or(`ref.ilike.%${f}%,couleur.ilike.%${f}%`);
-  }
-
-  const { data, error } = await req.order("ref", { ascending: true }).limit(500);
-  if (error) throw error;
-  return data || [];
-}
-
-function renderStockTable(rows) {
-  const tbody = $("stockTable").querySelector("tbody");
-  tbody.innerHTML = rows.map(r => `
-    <tr>
-      <td>${r.ref ?? ""}</td>
-      <td>${r.couleur ?? ""}</td>
-      <td>${r.manches ?? ""}</td>
-      <td>${r.taille ?? ""}</td>
-      <td><b>${r.qte_total ?? 0}</b></td>
-    </tr>
-  `).join("");
-
-  $("stockMeta").textContent = `Lignes: ${rows.length} (max 500).`;
-}
-
-/* ========= Events ========= */
-$("loginForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  setStatus("");
-
-  const rawName = $("name").value;
-  const rawPin = $("pin").value;
-
-  const name = normalizeText(rawName);
-  const pin = String(rawPin || "").trim();
-
-  if (!name) return setStatus("Nom requis.", "bad");
-  if (!/^\d{6}$/.test(pin)) return setStatus("PIN doit être 6 chiffres.", "bad");
-
-  try {
-    const user = await ensureUser(name, pin);
-    saveSession({ id: user.id, name: user.name });
-    toast("Connexion OK");
-    $("ref").focus();
-  } catch (err) {
-    setStatus(err.message || "Erreur connexion.", "bad");
-  }
-});
-
-$("logoutBtn").addEventListener("click", () => {
-  clearSession();
-  toast("Déconnecté");
-});
-
-$("calcBtn").addEventListener("click", () => {
-  const t = calcTotal();
-  toast(`Total carton: ${t}`);
-});
-
-$("entryForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  setStatus("");
-
-  const s = loadSession();
-  if (!s) return setStatus("Non connecté.", "bad");
-
-  // fields
-  const designation = normalizeText($("designation").value);
-  const grammageRaw = $("grammage").value;
-  const grammage = grammageRaw === "" ? null : Math.max(0, parseInt(grammageRaw, 10) || 0);
-
+  const designation = normalizeSpaces($("designation").value);
   const ref = normalizeRef($("ref").value);
-  const couleur = normalizeText($("couleur").value);
-  const manches = normalizeSleeve($("manches").value);
-  const carton_code = normalizeText($("carton_code").value) || null;
+  const grammage = onlyDigits(ITo1_ifNumericContext($("grammage").value));
+  const couleur = normalizeColor($("couleur").value);
+  const manches = normalizeSleeve($("manches").value || "");
+  const carton_code = normalizeSpaces($("cartonCode").value);
 
-  if (!ref) return setStatus("Référence requise.", "bad");
-  if (!manches) return setStatus("Manches: choisir MC ou ML.", "bad");
+  if (!ref) throw new Error("Référence requise.");
+  if (!couleur) throw new Error("Couleur requise.");
+  if (!(manches === "MC" || manches === "ML")) throw new Error("Manches doit être MC ou ML.");
 
-  const tailles_json = getSizesJson();
+  const tailles_json = readSizesFromUI();
   const total = calcTotal();
-
-  if (total <= 0) {
-    return setStatus("Total = 0. Saisis au moins une quantité.", "bad");
-  }
+  if (total <= 0) throw new Error("Total carton = 0. Rien à envoyer.");
 
   const payload = {
-    carton_code,
     designation: designation || null,
+    grammage: grammage ? parseInt(grammage, 10) : null,
     ref,
-    grammage,
-    couleur: couleur || null,
+    couleur,
     manches,
-    tailles_json,      // jsonb
-    counted_by: s.name // texte
+    carton_code: carton_code || null,
+    tailles_json,
+    counted_by: currentUser.name
   };
 
-  try {
-    $("sendBtn").disabled = true;
-    setStatus("Envoi en cours…", "");
+  const { error } = await sb.from("inventory_counts").insert(payload);
+  if (error) throw error;
 
-    await insertCount(payload);
-
-    // Historique local
-    addHistory({
-      ref,
-      couleur,
-      manches,
-      carton_code,
-      total,
-      counted_by: s.name,
-      when: new Date().toLocaleString("fr-FR")
-    });
-
-    setStatus("Carton enregistré ✔", "ok");
-    toast("Enregistré ✔");
-
-    // reset quantités seulement (gagne du temps)
-    document.querySelectorAll("input[data-size]").forEach(i => i.value = "");
-    $("totalCarton").textContent = "0";
-
-    // garde ref/couleur/grammage si tu veux… ou reset complet :
-    // $("designation").value = "";
-    // $("ref").value = "";
-    // $("couleur").value = "";
-    // $("grammage").value = "";
-
-    // refresh stock (optionnel)
-    try {
-      const rows = await loadStockTotals($("stockFilter").value);
-      renderStockTable(rows);
-    } catch {}
-
-    $("ref").focus();
-  } catch (err) {
-    setStatus(err.message || "Erreur envoi.", "bad");
-  } finally {
-    $("sendBtn").disabled = false;
-  }
-});
-
-/* ========= Stock panel ========= */
-$("refreshStockBtn").addEventListener("click", async () => {
-  try {
-    setStatus("Chargement stock…", "");
-    const rows = await loadStockTotals($("stockFilter").value);
-    renderStockTable(rows);
-    setStatus("Stock chargé.", "ok");
-  } catch (err) {
-    setStatus(err.message || "Erreur stock.", "bad");
-  }
-});
-
-$("stockFilter").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    $("refreshStockBtn").click();
-  }
-});
-
-/* ========= Init ========= */
-function init() {
-  buildSizesUI();
-  initSleeves();
-  initTabs();
-  renderSession();
-  renderHistory();
-
-  // Auto: si session, pré-charge stock
-  const s = loadSession();
-  if (s) $("refreshStockBtn").click();
+  toast(`OK envoyé. Compté par: ${currentUser.name}`, "ok");
 }
-init();
+
+/* =========================
+   UI INIT
+========================= */
+function buildSizesGrid() {
+  const grid = $("sizesGrid");
+  grid.innerHTML = "";
+  for (const k of SIZES) {
+    const div = document.createElement("div");
+    div.className = "size";
+    div.innerHTML = `
+      <div class="k">${k}</div>
+      <input data-size="${k}" inputmode="numeric" placeholder="0" />
+    `;
+    grid.appendChild(div);
+  }
+}
+
+function setSleeve(v) {
+  const val = (v || "").toUpperCase();
+  $("manches").value = val;
+
+  document.querySelectorAll(".seg-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.sleeve === val);
+  });
+}
+
+function showApp() {
+  $("cardLogin").classList.add("hidden");
+  $("cardApp").classList.remove("hidden");
+  $("btnLogout").classList.remove("hidden");
+}
+
+function showLogin() {
+  $("cardLogin").classList.remove("hidden");
+  $("cardApp").classList.add("hidden");
+  $("btnLogout").classList.add("hidden");
+  currentUser = null;
+}
+
+/* =========================
+   EVENTS
+========================= */
+window.addEventListener("DOMContentLoaded", () => {
+  buildSizesGrid();
+  setSleeve("");
+
+  // sleeve buttons
+  document.querySelectorAll(".seg-btn").forEach(btn => {
+    btn.addEventListener("click", () => setSleeve(btn.dataset.sleeve));
+  });
+
+  // calc
+  $("btnCalc").addEventListener("click", calcTotal);
+  $("sizesGrid").addEventListener("input", () => calcTotal());
+
+  // login
+  $("btnLogin").addEventListener("click", async () => {
+    try {
+      $("loginHint").textContent = "";
+      const name = $("loginName").value;
+      const pin = $("loginPin").value;
+      const user = await loginOrCreate(name, pin);
+      currentUser = user;
+      showApp();
+      toast(`Connecté: ${currentUser.name}`, "ok");
+    } catch (e) {
+      $("loginHint").textContent = e.message || String(e);
+      toast(e.message || "Erreur connexion", "bad");
+    }
+  });
+
+  $("btnLogout").addEventListener("click", () => {
+    stopCamera();
+    showLogin();
+    toast("Déconnecté.", "");
+  });
+
+  // camera
+  $("btnStartCam").addEventListener("click", async () => {
+    try {
+      await startCamera();
+    } catch (e) {
+      toast("Caméra refusée ou indisponible.", "bad");
+    }
+  });
+
+  $("btnStopCam").addEventListener("click", () => stopCamera());
+
+  // capture + OCR
+  $("btnCapture").addEventListener("click", async () => {
+    try {
+      const canvas = captureFrame();
+      setOcrProgress(1, "Capture OK. OCR…");
+
+      const text = await runOCR(canvas);
+      const fields = extractFieldsFromOcr(text);
+      fillForm(fields);
+
+      // on stoppe caméra si tu veux économiser
+      // stopCamera();
+    } catch (e) {
+      toast("OCR échoué. Re-cadre l’étiquette, meilleure lumière.", "bad");
+    }
+  });
+
+  // send
+  $("btnSend").addEventListener("click", async () => {
+    try {
+      await sendToDb();
+    } catch (e) {
+      toast(e.message || "Erreur envoi", "bad");
+    }
+  });
+
+  toast("Prêt. Connecte-toi puis scanne une étiquette.", "");
+});
