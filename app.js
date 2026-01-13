@@ -48,7 +48,152 @@ async function sha256Hex(text){
   const buf = await crypto.subtle.digest("SHA-256", enc);
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,"0")).join("");
 }
+// -----------------------------
+// OCR PHOTO (Tesseract.js)
+// -----------------------------
+const photoInput = document.getElementById("photoInput");
+const btnScanPhoto = document.getElementById("btnScanPhoto");
+const scanStatus = document.getElementById("scanStatus");
 
+// Champs à remplir (adapte les IDs à tes inputs existants)
+const fDesignation = document.getElementById("designation");
+const fRef        = document.getElementById("ref");
+const fGrammage   = document.getElementById("grammage");
+const fCouleur    = document.getElementById("couleur");
+const fManches    = document.querySelector('input[name="manches"]'); // ou ton select/boutons
+
+// Tailles (adapte si tes IDs sont différents)
+const sizeIds = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
+
+function normalizeText(t) {
+  return (t || "")
+    .replace(/\r/g, "\n")
+    .replace(/[“”]/g, '"')
+    .replace(/[’]/g, "'")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n\s+/g, "\n")
+    .trim();
+}
+
+// règle métier : "I" = "1"
+function normalizeRef(ref) {
+  if (!ref) return "";
+  let r = ref.toUpperCase().replace(/\s+/g, "");
+  r = r.replace(/I/g, "1"); // <--- ta règle
+  return r;
+}
+
+function pickLineAfter(label, lines) {
+  const idx = lines.findIndex(l => l.toUpperCase().includes(label));
+  if (idx >= 0 && lines[idx + 1]) return lines[idx + 1].trim();
+  return "";
+}
+
+function extractFieldsFromOCR(raw) {
+  const text = normalizeText(raw);
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  // Heuristique : on essaye "ligne après le libellé"
+  let designation = pickLineAfter("DESIGNATION", lines);
+  let ref = pickLineAfter("REFERENCE", lines);
+  let grammage = pickLineAfter("GRAMMAGE", lines);
+  let couleur = pickLineAfter("COULEUR", lines);
+  let manches = pickLineAfter("MANCHES", lines);
+
+  // secours : chercher patterns usuels
+  if (!ref) {
+    const m = text.toUpperCase().match(/\b([A-Z]\s*[\dI]{2,4})\b/); // ex E191, E19I
+    if (m) ref = m[1];
+  }
+
+  // Grammage : nombre 120..300 typiquement
+  if (!grammage) {
+    const g = text.match(/\b(1[0-9]{2}|2[0-9]{2}|300)\b/);
+    if (g) grammage = g[1];
+  }
+
+  // Manches : MC ou ML
+  if (!manches) {
+    const s = text.toUpperCase().match(/\b(MC|ML)\b/);
+    if (s) manches = s[1];
+  }
+
+  // Tailles : on récupère quantités comme "L 50", "XL 13"
+  const tailles = {};
+  for (const sz of sizeIds) tailles[sz] = "";
+
+  // Pattern robuste : (TAILLE) puis (nombre)
+  // ex: "L 50", "XL 13"
+  const re = new RegExp(`\\b(${sizeIds.map(s=>s.replace("3","3")).join("|")})\\b\\s*[:\\-]?\\s*(\\d{1,3})\\b`, "gi");
+  let mm;
+  while ((mm = re.exec(text)) !== null) {
+    const taille = mm[1].toUpperCase();
+    const qte = mm[2];
+    tailles[taille] = qte;
+  }
+
+  return {
+    designation,
+    ref: normalizeRef(ref),
+    grammage,
+    couleur,
+    manches: (manches || "").toUpperCase(),
+    tailles
+  };
+}
+
+async function runOCR(file) {
+  scanStatus.textContent = "OCR en cours…";
+  const { data } = await Tesseract.recognize(file, "eng", {
+    logger: (m) => {
+      if (m.status === "recognizing text") {
+        scanStatus.textContent = `OCR… ${Math.round(m.progress * 100)}%`;
+      }
+    }
+  });
+  return data.text;
+}
+
+function fillFormFromExtract(ex) {
+  if (fDesignation && ex.designation) fDesignation.value = ex.designation;
+  if (fRef && ex.ref) fRef.value = ex.ref;
+  if (fGrammage && ex.grammage) fGrammage.value = ex.grammage;
+  if (fCouleur && ex.couleur) fCouleur.value = ex.couleur;
+
+  // manches MC/ML : adapte selon ton UI
+  if (ex.manches === "MC" || ex.manches === "ML") {
+    // si tu as un input texte :
+    if (fManches) fManches.value = ex.manches;
+    // si tu as des boutons radio :
+    const radio = document.querySelector(`input[name="manches"][value="${ex.manches}"]`);
+    if (radio) radio.checked = true;
+  }
+
+  // tailles
+  for (const sz of sizeIds) {
+    const el = document.getElementById(`q_${sz}`); // ex: q_L, q_XL...
+    if (el && ex.tailles[sz] !== "") el.value = ex.tailles[sz];
+  }
+}
+
+btnScanPhoto?.addEventListener("click", async () => {
+  try {
+    const file = photoInput?.files?.[0];
+    if (!file) {
+      scanStatus.textContent = "Sélectionne une photo d’abord.";
+      return;
+    }
+
+    const raw = await runOCR(file);
+    const ex = extractFieldsFromOCR(raw);
+
+    fillFormFromExtract(ex);
+    scanStatus.textContent = "Scan terminé ✅ (vérifie rapidement avant Valider).";
+  } catch (e) {
+    console.error(e);
+    scanStatus.textContent = "Erreur OCR. Essaie avec une photo plus nette, bien cadrée.";
+  }
+});
 // =====================
 // SESSION LOCAL (appareil)
 // =====================
