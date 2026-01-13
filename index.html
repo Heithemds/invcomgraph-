@@ -2,86 +2,125 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Inventaire Atelier</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=1" />
 </head>
+
 <body>
-  <!-- Barre supérieure -->
   <header class="topbar">
     <div class="brand">
       <div class="logo">⚡</div>
-      <div class="text-block">
-        <div class="title">Inventaire Atelier</div>
-        <div class="subtitle">OCR par zones&nbsp;• Remplissage auto</div>
+      <div class="brandText">
+        <div class="brandTitle">Inventaire Atelier</div>
+        <div class="brandSub">OCR par zones • Remplissage auto</div>
       </div>
     </div>
-    <div class="session">
-      <span id="userBadge" class="badge"></span>
-      <button id="btnLogout" class="btn small" disabled>Déconnexion</button>
+
+    <div class="topRight">
+      <div id="userChip" class="chip hidden">
+        <span class="chipIcon">👤</span>
+        <span id="userName">—</span>
+      </div>
+      <button id="btnLogout" class="btn ghost hidden">Déconnexion</button>
     </div>
   </header>
 
-  <main class="wrapper">
-    <!-- Section Auth -->
-    <section id="authSection" class="card">
-      <h2>Accès / Inscription</h2>
-      <div class="auth-grid">
-        <div class="auth-block">
-          <h3>Inscription</h3>
-          <input id="regName" type="text" placeholder="Nom" />
-          <input id="regPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (6 chiffres)" />
-          <input id="regPin2" type="password" inputmode="numeric" maxlength="6" placeholder="Confirmer PIN" />
-          <button id="btnRegister" class="btn primary">S’inscrire</button>
+  <main class="container">
+    <!-- AUTH -->
+    <section id="authCard" class="card">
+      <h2>Connexion / Inscription</h2>
+      <p class="muted">Nom + PIN (6 chiffres). Choisis <b>Inscrire</b> pour créer, ou <b>Connecter</b> pour se connecter.</p>
+
+      <div class="grid2">
+        <div class="field">
+          <label>Nom</label>
+          <input id="authName" type="text" placeholder="Ex : Mouna" autocomplete="off" />
         </div>
-        <div class="auth-block">
-          <h3>Connexion</h3>
-          <input id="loginName" type="text" placeholder="Nom" />
-          <input id="loginPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (6 chiffres)" />
-          <button id="btnLogin" class="btn">Se connecter</button>
+
+        <div class="field">
+          <label>PIN (6 chiffres)</label>
+          <input id="authPin" type="password" inputmode="numeric" maxlength="6" placeholder="******" />
+        </div>
+
+        <div class="field">
+          <label>Confirmer PIN (inscription)</label>
+          <input id="authPin2" type="password" inputmode="numeric" maxlength="6" placeholder="******" />
+        </div>
+
+        <div class="field">
+          <label>&nbsp;</label>
+          <div class="row">
+            <button id="btnSignup" class="btn">Inscrire</button>
+            <button id="btnLogin" class="btn secondary">Connecter</button>
+          </div>
         </div>
       </div>
-      <div id="authMsg" class="message"></div>
+
+      <div id="authMsg" class="msg"></div>
+      <details class="diag">
+        <summary>Diagnostics rapides</summary>
+        <div class="diagBox" id="diagBox"></div>
+      </details>
     </section>
 
-    <!-- Section Appli (saisie) -->
-    <section id="appSection" class="card" style="display:none">
-      <h2>Saisie carton (remplie par OCR)</h2>
-      <!-- Boutons scanner / vider -->
-      <div class="row">
-      <button id="scanBtn" class="btn icon">📷 Scanner</button>
-      <input id="scanInput" type="file" accept="image/*" capture="environment" style="display:none" />
-      <button id="btnClear" class="btn ghost">Vider</button>
+    <!-- APP -->
+    <section id="appCard" class="card hidden">
+      <div class="row spaceBetween">
+        <div>
+          <h2>Saisie carton (remplie par OCR)</h2>
+          <p class="muted">Astuce : aligne l’étiquette dans le cadre, lumière forte, pas d’ombre.</p>
+        </div>
+        <div class="row">
+          <button id="btnScan" class="btn">📸 Scanner</button>
+          <button id="btnClear" class="btn ghost">Vider</button>
+        </div>
       </div>
-      <div id="scanStatus" class="status"></div>
 
-      <!-- Champ formulaire -->
-      <div class="form-grid">
-        <label>Désignation
-          <input id="designation" type="text" placeholder="Tshirt / Polo / Chemise" />
-        </label>
-        <label>Référence
-          <input id="ref" type="text" placeholder="E191" />
-        </label>
-        <label>Grammage
+      <input id="fileScan" class="hidden" type="file" accept="image/*" capture="environment" />
+
+      <div id="scanMsg" class="msg"></div>
+
+      <div class="grid2">
+        <div class="field">
+          <label>Désignation</label>
+          <input id="designation" type="text" placeholder="Tshirt / Polo / Chemise..." />
+        </div>
+
+        <div class="field">
+          <label>Référence</label>
+          <input id="reference" type="text" placeholder="Ex : E191" />
+          <div class="hint">Règle : I = 1 (ex : 19I → 191)</div>
+        </div>
+
+        <div class="field">
+          <label>Grammage</label>
           <input id="grammage" type="text" inputmode="numeric" placeholder="190" />
-        </label>
-        <label>Couleur
+        </div>
+
+        <div class="field">
+          <label>Couleur</label>
           <input id="couleur" type="text" placeholder="Dark Grey" />
-        </label>
-        <label>Code carton (optionnel)
-          <input id="cartonCode" type="text" placeholder="A12-03" />
-        </label>
-        <label>Manches
-          <div class="chips">
-            <button id="btnMC" type="button" class="chip selected" data-manches="MC">MC</button>
-            <button id="btnML" type="button" class="chip" data-manches="ML">ML</button>
-            <input id="manches" type="hidden" value="MC" />
+        </div>
+
+        <div class="field">
+          <label>Code carton (optionnel)</label>
+          <input id="codeCarton" type="text" placeholder="A12-03" />
+        </div>
+
+        <div class="field">
+          <label>Manches</label>
+          <div class="toggle">
+            <button id="btnMC" class="pill">MC</button>
+            <button id="btnML" class="pill">ML</button>
           </div>
-        </label>
+          <div class="hint">Seulement MC ou ML</div>
+        </div>
       </div>
 
-      <h3>Quantités par taille</h3>
+      <hr class="sep" />
+
+      <h3>Quantités par taille (jusqu’à 5XL)</h3>
       <div class="sizes-grid">
         <label>XS<input data-size="XS" type="text" inputmode="numeric" placeholder="0" /></label>
         <label>S<input data-size="S" type="text" inputmode="numeric" placeholder="0" /></label>
@@ -94,20 +133,18 @@
         <label>5XL<input data-size="5XL" type="text" inputmode="numeric" placeholder="0" /></label>
       </div>
 
-      <div class="footer">
-        Total carton&nbsp;: <span id="totalCarton">0</span>
+      <div class="row spaceBetween bottomBar">
+        <div class="totalBox">Total carton : <b id="totalCarton">0</b></div>
+        <button id="btnSubmit" class="btn">Valider & Envoyer</button>
       </div>
-
-      <button id="btnSubmit" class="btn primary">Valider &amp; Envoyer</button>
-      <div id="saveMsg" class="message"></div>
     </section>
   </main>
 
-  <!-- Librairies externes -->
+  <!-- IMPORTANT: supabase-js DOIT être chargé avant app.js -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
-  <!-- Script application -->
-  <script src="app.js"></script>
+  <!-- Cache-bust conseillé sur GitHub Pages -->
+  <script src="app.js?v=1"></script>
 </body>
 </html>
