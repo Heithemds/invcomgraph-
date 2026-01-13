@@ -16,138 +16,149 @@
         <div class="subtitle">Scan étiquette • Base centralisée • Totaux</div>
       </div>
     </div>
-
     <div class="top-actions">
       <button id="btnLogout" class="btn ghost hidden">Déconnexion</button>
     </div>
   </header>
 
   <main class="container">
-    <!-- Connexion -->
-    <section class="card" id="cardLogin">
-      <div class="card-head">
-        <h2>Connexion</h2>
-        <p>Nom + PIN (6 chiffres). Si le nom n’existe pas, l’app le crée.</p>
-      </div>
 
-      <div class="grid grid-2">
+    <!-- Connexion / inscription -->
+    <section class="card" id="cardLogin">
+      <h2>Connexion</h2>
+      <p class="muted">
+        Nom + PIN (6 chiffres). Si le nom n’existe pas, l’app te demande une confirmation et crée l’utilisateur.
+      </p>
+
+      <div class="grid2">
         <div class="field">
           <label>Nom</label>
-          <input id="loginName" placeholder="Ex: Maeva" autocomplete="off" />
+          <input id="loginName" placeholder="Ex: Mouna" autocomplete="off" />
         </div>
+
         <div class="field">
           <label>PIN (6 chiffres)</label>
-          <input id="loginPin" placeholder="******" inputmode="numeric" maxlength="6" />
+          <input id="loginPin" inputmode="numeric" maxlength="6" placeholder="******" />
+        </div>
+
+        <div class="field">
+          <label>Confirmer PIN (6 chiffres) — uniquement si nouveau</label>
+          <input id="loginPin2" inputmode="numeric" maxlength="6" placeholder="******" />
         </div>
       </div>
 
       <div class="row">
         <button id="btnLogin" class="btn primary">Entrer</button>
-        <div class="hint" id="loginHint"></div>
+        <span id="loginHint" class="hint"></span>
       </div>
+
+      <details class="diag">
+        <summary>Diagnostics rapides</summary>
+        <div class="muted small">
+          Si tu vois “Invalid API key”, c’est presque toujours : mauvaise clé “anon public” ou mauvais URL.
+          Mets la clé <b>anon (public)</b> de Supabase (Project Settings → API).
+        </div>
+      </details>
     </section>
 
     <!-- App -->
     <section class="card hidden" id="cardApp">
-      <div class="card-head">
-        <h2>Saisie carton</h2>
-        <p class="muted">
-          Astuce atelier : écris gros au marqueur, l’app doit être plus rapide que ton stylo.
-        </p>
-      </div>
-
-      <!-- Scan -->
-      <div class="scan-wrap">
-        <div class="scan-left">
-          <div class="scan-title">Scan étiquette</div>
-          <div class="muted">Aucune photo stockée. Capture temporaire uniquement.</div>
-
-          <div class="scan-actions">
-            <button id="btnStartCam" class="btn">Ouvrir caméra</button>
-            <button id="btnCapture" class="btn primary" disabled>Scanner</button>
-            <button id="btnStopCam" class="btn ghost" disabled>Stop</button>
+      <div class="apphead">
+        <div>
+          <h2>Saisie carton</h2>
+          <div class="muted small">
+            Astuce atelier : tu peux taper vite. Le nom du compteur est automatiquement enregistré.
           </div>
-
-          <div class="progress">
-            <div class="bar" id="ocrBar"></div>
-          </div>
-          <div class="muted small" id="ocrStatus">OCR prêt.</div>
-
-          <details class="diag">
-            <summary>Diagnostics OCR</summary>
-            <pre id="ocrRaw" class="pre"></pre>
-          </details>
         </div>
-
-        <div class="scan-right">
-          <video id="video" playsinline></video>
-          <canvas id="canvas" class="hidden"></canvas>
+        <div class="userpill">
+          <span class="dot"></span>
+          <span id="whoami">—</span>
         </div>
       </div>
 
-      <hr class="sep"/>
-
-      <!-- Form -->
-      <div class="grid grid-3">
+      <div class="grid3">
         <div class="field">
           <label>Désignation</label>
-          <input id="designation" placeholder="Tshirt / Polo / Chemise..." />
-        </div>
-
-        <div class="field">
-          <label>Grammage</label>
-          <input id="grammage" placeholder="190" inputmode="numeric" />
+          <input id="designation" placeholder="Tshirt / Polo / Chemise…" />
         </div>
 
         <div class="field">
           <label>Référence</label>
           <input id="ref" placeholder="E191" />
-          <div class="muted small">Règle : I = 1 si contexte numérique.</div>
+          <div class="muted small">Règle : “I” est accepté comme “1”.</div>
         </div>
 
-        <div class="field span-2">
-          <label>Couleur</label>
-          <input id="couleur" placeholder="Dark Grey / Urban Orange..." />
+        <div class="field">
+          <label>Grammage</label>
+          <input id="grammage" inputmode="numeric" placeholder="190" />
+        </div>
+
+        <div class="field">
+          <label>Couleur (nom long)</label>
+          <input id="couleur" placeholder="Dark Grey / Urban Orange…" />
         </div>
 
         <div class="field">
           <label>Manches</label>
           <div class="seg">
-            <button type="button" class="seg-btn" data-sleeve="MC">MC</button>
-            <button type="button" class="seg-btn" data-sleeve="ML">ML</button>
+            <button type="button" class="segbtn" data-manches="MC">MC</button>
+            <button type="button" class="segbtn" data-manches="ML">ML</button>
           </div>
           <input id="manches" class="hidden" />
-          <div class="muted small">Règle : seulement MC ou ML.</div>
+          <div class="muted small">Choisir MC ou ML.</div>
         </div>
 
-        <div class="field span-3">
+        <div class="field">
           <label>Code carton (optionnel)</label>
-          <input id="cartonCode" placeholder="Ex: A12-03" />
+          <input id="carton_code" placeholder="Ex: A12-03" />
         </div>
       </div>
 
-      <h3 class="h3">Quantités par taille</h3>
-      <div class="sizes" id="sizesGrid"></div>
+      <hr class="sep" />
 
-      <div class="row between">
-        <div class="total">
+      <h3>Quantités par taille</h3>
+      <div class="muted small">Laisse vide les tailles absentes (équivaut à 0).</div>
+
+      <div class="sizes">
+        <div class="sizefield"><label>XS</label><input id="t_XS" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>S</label><input id="t_S" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>M</label><input id="t_M" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>L</label><input id="t_L" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>XL</label><input id="t_XL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>XXL</label><input id="t_XXL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>3XL</label><input id="t_3XL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>4XL</label><input id="t_4XL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>5XL</label><input id="t_5XL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>6XL</label><input id="t_6XL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>7XL</label><input id="t_7XL" inputmode="numeric" placeholder="0" /></div>
+        <div class="sizefield"><label>8XL</label><input id="t_8XL" inputmode="numeric" placeholder="0" /></div>
+      </div>
+
+      <div class="row space">
+        <button id="btnCalc" class="btn ghost">Calcul total</button>
+        <div class="totalbox">
           <div class="muted small">Total carton</div>
-          <div id="totalCarton" class="total-num">0</div>
+          <div id="totalCarton" class="total">0</div>
         </div>
-
-        <div class="row">
-          <button id="btnCalc" class="btn">Calcul total</button>
-          <button id="btnSend" class="btn primary">Valider & Envoyer</button>
-        </div>
+        <button id="btnSend" class="btn primary">Valider & Envoyer</button>
       </div>
 
-      <div class="toast" id="toast"></div>
+      <div id="appHint" class="hint"></div>
+
+      <hr class="sep" />
+
+      <h3>Historique (appareil)</h3>
+      <div class="muted small">Trace locale (sur ce téléphone/PC), utile en atelier.</div>
+      <div id="localHistory" class="history"></div>
+
     </section>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
   </main>
 
-  <!-- libs -->
+  <!-- Supabase JS (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
