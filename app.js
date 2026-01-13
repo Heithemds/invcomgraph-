@@ -1,446 +1,410 @@
-/***********************
- * CONFIG
- ***********************/
-const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co"; // ex: https://xxxx.supabase.co
+/* ========= CONFIG =========
+   ⚠️ Remplace par TES valeurs.
+   Conseil: rotate la anon key sur Supabase.
+*/
+const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
 
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/***********************
- * UTIL
- ***********************/
+/* ========= UI helpers ========= */
 const $ = (id) => document.getElementById(id);
+const toast = (msg) => {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("toast--show");
+  setTimeout(() => t.classList.remove("toast--show"), 1800);
+};
+const setStatus = (msg, kind = "") => {
+  const el = $("statusLine");
+  el.className = "status " + (kind ? `status--${kind}` : "");
+  el.textContent = msg || "";
+};
 
-function normName(s){
-  return (s || "").trim();
-}
-
-function isValidPin(pin){
-  return /^\d{6}$/.test(pin);
-}
-
-// Hash simple côté client (pas parfait, mais OK pour votre besoin "atelier")
-// Pour plus solide: RPC côté serveur ou auth. Là on vise vitesse.
-async function sha256(str){
-  const enc = new TextEncoder().encode(str);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
-function onlyIntOrEmpty(v){
-  const s = (v || "").toString().trim();
-  if(s === "") return "";
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) ? String(n) : "";
-}
-
-function setMsg(el, text, cls){
-  el.className = "msg " + (cls || "");
-  el.textContent = text || "";
-}
-
-function normalizeRef(ref){
-  // règle anti confusion: I = 1
-  // et suppression espaces
-  return (ref || "")
-    .trim()
-    .toUpperCase()
-    .replaceAll(" ", "")
-    .replaceAll("I", "1");
-}
-
-/***********************
- * SESSION (local)
- ***********************/
+/* ========= Session local ========= */
 const SESSION_KEY = "inv_session_v1";
+const HISTORY_KEY = "inv_history_v1";
 
-function setSession(session){
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-}
-function getSession(){
+function loadSession() {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
   catch { return null; }
 }
-function clearSession(){
+function saveSession(s) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  renderSession();
+}
+function clearSession() {
   localStorage.removeItem(SESSION_KEY);
+  renderSession();
 }
 
-/***********************
- * UI refs
- ***********************/
-const viewLogin = $("viewLogin");
-const viewApp = $("viewApp");
-
-const loginName = $("loginName");
-const loginPin = $("loginPin");
-const btnLogin = $("btnLogin");
-const loginMsg = $("loginMsg");
-
-const userBadge = $("userBadge");
-const btnLogout = $("btnLogout");
-
-const f_designation = $("f_designation");
-const f_ref = $("f_ref");
-const f_grammage = $("f_grammage");
-const f_couleur = $("f_couleur");
-const f_carton = $("f_carton");
-const btnMC = $("btnMC");
-const btnML = $("btnML");
-
-const btnCalcTotal = $("btnCalcTotal");
-const totalCartonEl = $("totalCarton");
-const btnSave = $("btnSave");
-const saveMsg = $("saveMsg");
-
-const filterRef = $("filterRef");
-const filterCouleur = $("filterCouleur");
-const filterManches = $("filterManches");
-const btnRefresh = $("btnRefresh");
-const btnExportCsv = $("btnExportCsv");
-const stockMsg = $("stockMsg");
-const stockTableBody = $("stockTable").querySelector("tbody");
-
-let manchesSelected = "MC";
-
-/***********************
- * MANCHES selector
- ***********************/
-function setManches(val){
-  manchesSelected = val;
-  btnMC.classList.toggle("active", val === "MC");
-  btnML.classList.toggle("active", val === "ML");
+function addHistory(entry) {
+  const list = loadHistory();
+  list.unshift(entry);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 20)));
+  renderHistory();
 }
-btnMC.addEventListener("click", () => setManches("MC"));
-btnML.addEventListener("click", () => setManches("ML"));
-setManches("MC");
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
+  catch { return []; }
+}
 
-/***********************
- * LOGIN FLOW
- ***********************/
-async function loginOrRegister(){
-  setMsg(loginMsg, "", "");
-  const name = normName(loginName.value);
-  const pin = (loginPin.value || "").trim();
+/* ========= Normalisation règles =========
+  - REF : accepte I comme 1 (ex: 19I -> 191)
+  - Uppercase + trim
+*/
+function normalizeRef(v) {
+  if (!v) return "";
+  return String(v).trim().toUpperCase().replace(/I/g, "1");
+}
+function normalizeText(v) {
+  return (v ?? "").toString().trim();
+}
+function normalizeSleeve(v) {
+  const x = (v ?? "").toString().trim().toUpperCase();
+  return (x === "MC" || x === "ML") ? x : "";
+}
 
-  if(!name){
-    setMsg(loginMsg, "Nom requis.", "bad");
+/* ========= Tailles ========= */
+const SIZES = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
+
+function buildSizesUI() {
+  const grid = $("sizesGrid");
+  grid.innerHTML = "";
+  for (const s of SIZES) {
+    const cell = document.createElement("div");
+    cell.className = "sizeCell";
+    cell.innerHTML = `
+      <div class="sizeCell__top">
+        <span class="badge">${s}</span>
+        <span class="micro">Qté</span>
+      </div>
+      <input data-size="${s}" inputmode="numeric" type="number" min="0" placeholder="0" />
+    `;
+    grid.appendChild(cell);
+  }
+
+  // navigation clavier (Entrée = next)
+  const inputs = [...grid.querySelectorAll("input[data-size]")];
+  inputs.forEach((inp, idx) => {
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const next = inputs[idx + 1];
+        if (next) next.focus();
+        else $("sendBtn").focus();
+      }
+    });
+    inp.addEventListener("input", () => calcTotal());
+  });
+}
+
+function getSizesJson() {
+  const out = {};
+  const inputs = document.querySelectorAll("input[data-size]");
+  inputs.forEach((i) => {
+    const size = i.getAttribute("data-size");
+    const val = i.value === "" ? "" : String(Math.max(0, parseInt(i.value, 10) || 0));
+    // on garde "" pour "vide", sinon "nombre"
+    out[size] = val;
+  });
+  return out;
+}
+
+function calcTotal() {
+  const sizes = getSizesJson();
+  let sum = 0;
+  for (const k of Object.keys(sizes)) {
+    const n = parseInt(sizes[k], 10);
+    if (!Number.isNaN(n)) sum += n;
+  }
+  $("totalCarton").textContent = String(sum);
+  return sum;
+}
+
+/* ========= Manches toggle ========= */
+function initSleeves() {
+  const buttons = document.querySelectorAll(".seg__btn");
+  buttons.forEach((b) => {
+    b.addEventListener("click", () => {
+      buttons.forEach((x) => x.classList.remove("seg__btn--active"));
+      b.classList.add("seg__btn--active");
+      $("manches").value = b.dataset.sleeve;
+    });
+  });
+}
+
+/* ========= Tabs ========= */
+function initTabs() {
+  const tabs = document.querySelectorAll(".tab");
+  tabs.forEach((t) => {
+    t.addEventListener("click", () => {
+      tabs.forEach((x) => x.classList.remove("tab--active"));
+      t.classList.add("tab--active");
+      const name = t.dataset.tab;
+      document.querySelectorAll(".tabPanel").forEach((p) => p.classList.remove("tabPanel--active"));
+      $(`tab-${name}`).classList.add("tabPanel--active");
+    });
+  });
+}
+
+/* ========= Render ========= */
+function renderSession() {
+  const s = loadSession();
+  const pill = $("sessionPill");
+  const logout = $("logoutBtn");
+
+  if (!s) {
+    pill.textContent = "Non connecté";
+    logout.disabled = true;
+    $("loginCard").style.opacity = "1";
+    $("entryCard").style.opacity = ".55";
+    $("entryCard").style.pointerEvents = "none";
+    setStatus("Connecte-toi pour saisir.", "");
     return;
   }
-  if(!isValidPin(pin)){
-    setMsg(loginMsg, "PIN invalide (6 chiffres).", "bad");
+
+  pill.textContent = `Connecté : ${s.name}`;
+  logout.disabled = false;
+  $("loginCard").style.opacity = ".75";
+  $("entryCard").style.opacity = "1";
+  $("entryCard").style.pointerEvents = "auto";
+  setStatus(`Prêt. Saisis un carton (compteur: ${s.name}).`, "");
+}
+
+function renderHistory() {
+  const list = loadHistory();
+  const wrap = $("historyList");
+  if (!list.length) {
+    wrap.innerHTML = `<div class="micro">Aucun carton enregistré sur cet appareil pour l’instant.</div>`;
     return;
   }
+  wrap.innerHTML = list.map((it) => `
+    <div class="item">
+      <div class="item__top">
+        <div class="item__title">${it.ref} • ${it.couleur || "—"} • ${it.manches || "—"}</div>
+        <div class="micro">${it.total} pcs</div>
+      </div>
+      <div class="item__meta">
+        ${it.when} • par <b>${it.counted_by}</b> ${it.carton_code ? `• carton: ${it.carton_code}` : ""}
+      </div>
+    </div>
+  `).join("");
+}
 
-  const pin_hash = await sha256(pin);
-
-  // 1) check user exists
-  const { data: existing, error: e1 } = await db
+/* ========= DB calls ========= */
+async function ensureUser(name, pin) {
+  // Table: app_users(name text unique, pin text)
+  // 1) try select
+  const { data: found, error: e1 } = await db
     .from("app_users")
-    .select("id,name,pin_hash")
+    .select("id,name,pin")
     .eq("name", name)
     .maybeSingle();
 
-  if(e1){
-    setMsg(loginMsg, "Erreur DB (lecture user).", "bad");
-    console.error(e1);
-    return;
-  }
+  if (e1) throw e1;
 
-  if(!existing){
+  if (!found) {
     // create
-    const { error: e2 } = await db
+    const { data: created, error: e2 } = await db
       .from("app_users")
-      .insert({ name, pin_hash });
-
-    if(e2){
-      setMsg(loginMsg, "Erreur DB (création user).", "bad");
-      console.error(e2);
-      return;
-    }
-
-    setSession({ name });
-    showApp(name);
-    setMsg(loginMsg, "Utilisateur créé. Connexion OK.", "ok");
-    return;
+      .insert({ name, pin })
+      .select("id,name,pin")
+      .single();
+    if (e2) throw e2;
+    return created;
   }
 
-  // verify pin
-  if(existing.pin_hash !== pin_hash){
-    setMsg(loginMsg, "PIN incorrect.", "bad");
-    return;
+  // check pin
+  if (String(found.pin) !== String(pin)) {
+    throw new Error("PIN incorrect pour ce nom.");
   }
-
-  setSession({ name });
-  showApp(name);
-  setMsg(loginMsg, "Connexion OK.", "ok");
+  return found;
 }
 
-btnLogin.addEventListener("click", loginOrRegister);
-loginPin.addEventListener("keydown", (e) => {
-  if(e.key === "Enter") loginOrRegister();
+async function insertCount(payload) {
+  // Table: inventory_counts(...)
+  const { error } = await db.from("inventory_counts").insert(payload);
+  if (error) throw error;
+}
+
+async function loadStockTotals(filterText = "") {
+  // View/table: stock_total(ref, couleur, manches, taille, qte_total)
+  const q = db.from("stock_total").select("ref,couleur,manches,taille,qte_total");
+
+  // simple filter: contains on ref or couleur
+  const f = normalizeText(filterText);
+  let req = q;
+  if (f) {
+    // Supabase OR filter
+    req = req.or(`ref.ilike.%${f}%,couleur.ilike.%${f}%`);
+  }
+
+  const { data, error } = await req.order("ref", { ascending: true }).limit(500);
+  if (error) throw error;
+  return data || [];
+}
+
+function renderStockTable(rows) {
+  const tbody = $("stockTable").querySelector("tbody");
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.ref ?? ""}</td>
+      <td>${r.couleur ?? ""}</td>
+      <td>${r.manches ?? ""}</td>
+      <td>${r.taille ?? ""}</td>
+      <td><b>${r.qte_total ?? 0}</b></td>
+    </tr>
+  `).join("");
+
+  $("stockMeta").textContent = `Lignes: ${rows.length} (max 500).`;
+}
+
+/* ========= Events ========= */
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  setStatus("");
+
+  const rawName = $("name").value;
+  const rawPin = $("pin").value;
+
+  const name = normalizeText(rawName);
+  const pin = String(rawPin || "").trim();
+
+  if (!name) return setStatus("Nom requis.", "bad");
+  if (!/^\d{6}$/.test(pin)) return setStatus("PIN doit être 6 chiffres.", "bad");
+
+  try {
+    const user = await ensureUser(name, pin);
+    saveSession({ id: user.id, name: user.name });
+    toast("Connexion OK");
+    $("ref").focus();
+  } catch (err) {
+    setStatus(err.message || "Erreur connexion.", "bad");
+  }
 });
 
-/***********************
- * APP VIEW
- ***********************/
-function showApp(name){
-  viewLogin.classList.add("hidden");
-  viewApp.classList.remove("hidden");
-  userBadge.textContent = name;
-  userBadge.classList.remove("hidden");
-  btnLogout.classList.remove("hidden");
-  setMsg(saveMsg, "", "");
-  setMsg(stockMsg, "", "");
-  refreshStock();
-}
-
-function showLogin(){
-  viewApp.classList.add("hidden");
-  viewLogin.classList.remove("hidden");
-  userBadge.classList.add("hidden");
-  btnLogout.classList.add("hidden");
-}
-
-btnLogout.addEventListener("click", () => {
+$("logoutBtn").addEventListener("click", () => {
   clearSession();
-  showLogin();
+  toast("Déconnecté");
 });
 
-/***********************
- * TOTAL CALC
- ***********************/
-function getTaillesJson(){
-  const map = {
-    "XS": onlyIntOrEmpty($("q_xs").value),
-    "S":  onlyIntOrEmpty($("q_s").value),
-    "M":  onlyIntOrEmpty($("q_m").value),
-    "L":  onlyIntOrEmpty($("q_l").value),
-    "XL": onlyIntOrEmpty($("q_xl").value),
-    "XXL": onlyIntOrEmpty($("q_xxl").value),
-    "3XL": onlyIntOrEmpty($("q_3xl").value),
-    "4XL": onlyIntOrEmpty($("q_4xl").value),
-    "5XL": onlyIntOrEmpty($("q_5xl").value),
-    "6XL": onlyIntOrEmpty($("q_6xl").value),
-    "7XL": onlyIntOrEmpty($("q_7xl").value),
-    "8XL": onlyIntOrEmpty($("q_8xl").value),
-  };
-
-  // enlever vides
-  const cleaned = {};
-  for(const k of Object.keys(map)){
-    if(map[k] !== "" && map[k] !== "0"){
-      cleaned[k] = map[k];
-    }
-  }
-  return cleaned;
-}
-
-function calcTotal(){
-  const tailles = getTaillesJson();
-  let total = 0;
-  for(const k in tailles){
-    const n = parseInt(tailles[k], 10);
-    if(Number.isFinite(n)) total += n;
-  }
-  totalCartonEl.textContent = String(total);
-  return { total, tailles };
-}
-
-btnCalcTotal.addEventListener("click", () => {
-  const { total } = calcTotal();
-  setMsg(saveMsg, `Total calculé: ${total}`, "ok");
+$("calcBtn").addEventListener("click", () => {
+  const t = calcTotal();
+  toast(`Total carton: ${t}`);
 });
 
-/***********************
- * SAVE CARTON -> inventory_counts
- ***********************/
-async function saveCarton(){
-  setMsg(saveMsg, "", "");
-  const session = getSession();
-  if(!session?.name){
-    setMsg(saveMsg, "Session expirée. Reconnecte-toi.", "bad");
-    showLogin();
-    return;
-  }
+$("entryForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  setStatus("");
 
-  // validations
-  const designation = (f_designation.value || "").trim();
-  const refRaw = (f_ref.value || "").trim();
-  const ref = normalizeRef(refRaw);
-  const grammage = (f_grammage.value || "").trim();
-  const couleur = (f_couleur.value || "").trim();
-  const carton_code = (f_carton.value || "").trim();
+  const s = loadSession();
+  if (!s) return setStatus("Non connecté.", "bad");
 
-  if(!ref){
-    setMsg(saveMsg, "Référence requise.", "bad");
-    return;
-  }
-  if(!couleur){
-    setMsg(saveMsg, "Couleur requise.", "bad");
-    return;
-  }
-  if(!["MC","ML"].includes(manchesSelected)){
-    setMsg(saveMsg, "Manches invalides (MC/ML).", "bad");
-    return;
-  }
+  // fields
+  const designation = normalizeText($("designation").value);
+  const grammageRaw = $("grammage").value;
+  const grammage = grammageRaw === "" ? null : Math.max(0, parseInt(grammageRaw, 10) || 0);
 
-  const { total, tailles } = calcTotal();
-  if(total <= 0){
-    setMsg(saveMsg, "Aucune quantité saisie. (Total = 0)", "warn");
-    return;
+  const ref = normalizeRef($("ref").value);
+  const couleur = normalizeText($("couleur").value);
+  const manches = normalizeSleeve($("manches").value);
+  const carton_code = normalizeText($("carton_code").value) || null;
+
+  if (!ref) return setStatus("Référence requise.", "bad");
+  if (!manches) return setStatus("Manches: choisir MC ou ML.", "bad");
+
+  const tailles_json = getSizesJson();
+  const total = calcTotal();
+
+  if (total <= 0) {
+    return setStatus("Total = 0. Saisis au moins une quantité.", "bad");
   }
 
   const payload = {
-    carton_code: carton_code || null,
+    carton_code,
     designation: designation || null,
     ref,
-    grammage: grammage || null,
-    couleur,
-    manches: manchesSelected,
-    tailles_json: tailles,
-    total_carton: total,
-    counted_by: session.name
+    grammage,
+    couleur: couleur || null,
+    manches,
+    tailles_json,      // jsonb
+    counted_by: s.name // texte
   };
 
-  const { error } = await db.from("inventory_counts").insert(payload);
+  try {
+    $("sendBtn").disabled = true;
+    setStatus("Envoi en cours…", "");
 
-  if(error){
-    setMsg(saveMsg, "Erreur DB (insertion).", "bad");
-    console.error(error);
-    return;
+    await insertCount(payload);
+
+    // Historique local
+    addHistory({
+      ref,
+      couleur,
+      manches,
+      carton_code,
+      total,
+      counted_by: s.name,
+      when: new Date().toLocaleString("fr-FR")
+    });
+
+    setStatus("Carton enregistré ✔", "ok");
+    toast("Enregistré ✔");
+
+    // reset quantités seulement (gagne du temps)
+    document.querySelectorAll("input[data-size]").forEach(i => i.value = "");
+    $("totalCarton").textContent = "0";
+
+    // garde ref/couleur/grammage si tu veux… ou reset complet :
+    // $("designation").value = "";
+    // $("ref").value = "";
+    // $("couleur").value = "";
+    // $("grammage").value = "";
+
+    // refresh stock (optionnel)
+    try {
+      const rows = await loadStockTotals($("stockFilter").value);
+      renderStockTable(rows);
+    } catch {}
+
+    $("ref").focus();
+  } catch (err) {
+    setStatus(err.message || "Erreur envoi.", "bad");
+  } finally {
+    $("sendBtn").disabled = false;
   }
-
-  setMsg(saveMsg, "✅ Carton enregistré en base.", "ok");
-  clearForm();
-  refreshStock();
-}
-
-btnSave.addEventListener("click", saveCarton);
-
-function clearForm(){
-  f_designation.value = "";
-  f_ref.value = "";
-  f_grammage.value = "";
-  f_couleur.value = "";
-  f_carton.value = "";
-  setManches("MC");
-
-  const ids = ["q_xs","q_s","q_m","q_l","q_xl","q_xxl","q_3xl","q_4xl","q_5xl","q_6xl","q_7xl","q_8xl"];
-  ids.forEach(id => $(id).value = "");
-  totalCartonEl.textContent = "0";
-}
-
-/***********************
- * STOCK VIEW
- ***********************/
-async function refreshStock(){
-  setMsg(stockMsg, "Chargement...", "");
-  stockTableBody.innerHTML = "";
-
-  let q = db.from("stock_total").select("*").limit(500);
-
-  const r = normalizeRef(filterRef.value || "");
-  if(r) q = q.ilike("ref", `%${r}%`);
-
-  const c = (filterCouleur.value || "").trim();
-  if(c) q = q.ilike("couleur", `%${c}%`);
-
-  const m = filterManches.value;
-  if(m) q = q.eq("manches", m);
-
-  const { data, error } = await q;
-
-  if(error){
-    setMsg(stockMsg, "Erreur DB (lecture stock_total).", "bad");
-    console.error(error);
-    return;
-  }
-
-  if(!data || data.length === 0){
-    setMsg(stockMsg, "Aucune ligne.", "warn");
-    return;
-  }
-
-  for(const row of data){
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="mono">${row.ref || ""}</span></td>
-      <td>${row.couleur || ""}</td>
-      <td><strong>${row.manches || ""}</strong></td>
-      <td><strong>${row.taille || ""}</strong></td>
-      <td><strong>${row.qte ?? ""}</strong></td>
-    `;
-    stockTableBody.appendChild(tr);
-  }
-
-  setMsg(stockMsg, `✅ ${data.length} lignes`, "ok");
-}
-
-btnRefresh.addEventListener("click", refreshStock);
-
-/***********************
- * EXPORT CSV (stock_total)
- ***********************/
-function toCsv(rows){
-  const headers = ["ref","couleur","manches","taille","qte"];
-  const escape = (v) => {
-    const s = (v ?? "").toString();
-    if(s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replaceAll('"','""')}"`;
-    return s;
-  };
-  const lines = [
-    headers.join(","),
-    ...rows.map(r => headers.map(h => escape(r[h])).join(","))
-  ];
-  return lines.join("\n");
-}
-
-btnExportCsv.addEventListener("click", async () => {
-  setMsg(stockMsg, "Export en cours...", "");
-  let q = db.from("stock_total").select("*").limit(2000);
-
-  const r = normalizeRef(filterRef.value || "");
-  if(r) q = q.ilike("ref", `%${r}%`);
-
-  const c = (filterCouleur.value || "").trim();
-  if(c) q = q.ilike("couleur", `%${c}%`);
-
-  const m = filterManches.value;
-  if(m) q = q.eq("manches", m);
-
-  const { data, error } = await q;
-
-  if(error){
-    setMsg(stockMsg, "Erreur export (lecture).", "bad");
-    console.error(error);
-    return;
-  }
-
-  const csv = toCsv(data || []);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `stock_total_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-
-  setMsg(stockMsg, "✅ CSV généré.", "ok");
 });
 
-/***********************
- * BOOT
- ***********************/
-(function boot(){
-  // petite touche mono
-  const style = document.createElement("style");
-  style.textContent = `.mono{font-family: var(--mono); font-size: 13px;}`;
-  document.head.appendChild(style);
-
-  const session = getSession();
-  if(session?.name){
-    showApp(session.name);
-  } else {
-    showLogin();
+/* ========= Stock panel ========= */
+$("refreshStockBtn").addEventListener("click", async () => {
+  try {
+    setStatus("Chargement stock…", "");
+    const rows = await loadStockTotals($("stockFilter").value);
+    renderStockTable(rows);
+    setStatus("Stock chargé.", "ok");
+  } catch (err) {
+    setStatus(err.message || "Erreur stock.", "bad");
   }
-})();
+});
+
+$("stockFilter").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    $("refreshStockBtn").click();
+  }
+});
+
+/* ========= Init ========= */
+function init() {
+  buildSizesUI();
+  initSleeves();
+  initTabs();
+  renderSession();
+  renderHistory();
+
+  // Auto: si session, pré-charge stock
+  const s = loadSession();
+  if (s) $("refreshStockBtn").click();
+}
+init();
