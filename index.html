@@ -122,5 +122,13 @@
 
   <!-- IMPORTANT: module pour que Supabase ESM marche sur GitHub Pages -->
   <script type="module" src="./app.js"></script>
+<div class="card">
+  <h2>Scan étiquette (photo)</h2>
+
+  <input id="photoInput" type="file" accept="image/*" capture="environment" />
+  <button id="btnScanPhoto" type="button">Scanner la photo</button>
+
+  <div id="scanStatus" class="muted"></div>
+</div>
 </body>
 </html>
