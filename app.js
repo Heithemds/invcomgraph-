@@ -1,506 +1,531 @@
-/* ===========================
-   Inventaire Atelier — app.js
-   - Supabase (centralisé)
-   - Auth simple (app_users)
-   - OCR par zones (Tesseract + crops)
-   =========================== */
+/* ========= CONFIG SUPABASE =========
+   Mets ici TA clé anon "Project API keys > anon public"
+   (NE JAMAIS mettre la service_role dans un site public)
+==================================== */
+const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
 
-/* ====== CONFIG ====== */
-const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co"; // <-- mets ton URL
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";            // <-- mets ton anon key (public)
+/* ====== DOM ====== */
+const $ = (id) => document.getElementById(id);
 
-const LS_SESSION_KEY = "inv_atelier_session_v1";
+const authCard = $("authCard");
+const appCard  = $("appCard");
 
-/* ====== HELPERS DOM ====== */
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const authName = $("authName");
+const authPin  = $("authPin");
+const authPin2 = $("authPin2");
+const btnSignup= $("btnSignup");
+const btnLogin = $("btnLogin");
+const authMsg  = $("authMsg");
 
-function setText(sel, txt) {
-  const el = $(sel);
-  if (el) el.textContent = txt;
-}
+const userChip = $("userChip");
+const userName = $("userName");
+const btnLogout= $("btnLogout");
 
-function setValue(sel, val) {
-  const el = $(sel);
-  if (el) el.value = val ?? "";
-}
+const btnScan  = $("btnScan");
+const btnClear = $("btnClear");
+const btnSubmit= $("btnSubmit");
+const fileScan = $("fileScan");
+const scanMsg  = $("scanMsg");
 
-function getValue(sel) {
-  const el = $(sel);
-  return el ? (el.value ?? "").trim() : "";
-}
+const designation = $("designation");
+const reference   = $("reference");
+const grammage    = $("grammage");
+const couleur     = $("couleur");
+const codeCarton  = $("codeCarton");
 
-function show(el, yes = true) {
-  if (!el) return;
-  el.style.display = yes ? "" : "none";
-}
+const btnMC = $("btnMC");
+const btnML = $("btnML");
 
-function toast(msg) {
-  // simple fallback (tu peux remplacer par un toast UI)
-  alert(msg);
-}
+const totalCartonEl = $("totalCarton");
+const diagBox = $("diagBox");
 
-/* ====== SUPABASE INIT ====== */
-let sb = null;
+let supa = null;
+let currentUser = null;
+let manchesValue = ""; // "MC" | "ML"
 
-function initSupabase() {
-  try {
-    if (!window.supabase || typeof window.supabase.createClient !== "function") {
-      throw new Error("Supabase SDK non chargé (check <script supabase-js> dans index.html)");
-    }
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes("TONPROJET")) {
-      throw new Error("Config Supabase manquante (URL / ANON KEY).");
-    }
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    return true;
-  } catch (e) {
-    console.error(e);
-    toast("Supabase init failed: " + e.message);
-    return false;
+/* ====== INIT ====== */
+document.addEventListener("DOMContentLoaded", async () => {
+  safeDiag("Init…");
+
+  // 1) Vérif SDK Supabase
+  if (!window.supabase || typeof window.supabase.createClient !== "function") {
+    setMsg(authMsg, "Supabase SDK non chargé. Vérifie <script supabase-js> dans index.html", true);
+    return;
   }
-}
-
-/* ====== CRYPTO (hash PIN) ====== */
-async function sha256(text) {
-  const enc = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-function normalizeName(name) {
-  return (name || "").trim();
-}
-
-function isPin6(pin) {
-  return /^\d{6}$/.test(pin);
-}
-
-/* ====== SESSION ====== */
-function saveSession(session) {
-  localStorage.setItem(LS_SESSION_KEY, JSON.stringify(session));
-}
-
-function loadSession() {
-  try {
-    const raw = localStorage.getItem(LS_SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function clearSession() {
-  localStorage.removeItem(LS_SESSION_KEY);
-}
-
-function setLoggedUI(session) {
-  // Adapte selon tes sections HTML (ex: #authSection, #appSection)
-  const authSection = $("#authSection");
-  const appSection = $("#appSection");
-  const userBadge = $("#userBadge");      // ex: affiche "Mouna"
-  const btnLogout = $("#btnLogout");
-
-  if (session?.user) {
-    show(authSection, false);
-    show(appSection, true);
-    if (userBadge) userBadge.textContent = session.user.name;
-    if (btnLogout) btnLogout.disabled = false;
-  } else {
-    show(authSection, true);
-    show(appSection, false);
-    if (userBadge) userBadge.textContent = "";
-    if (btnLogout) btnLogout.disabled = true;
-  }
-}
-
-/* ====== DB: app_users ======
-   Tables attendues:
-   - app_users: id(uuid), name(text unique), pin_hash(text), created_at(timestamp default now())
-   - inventory_counts: id(uuid), designation text, ref text, grammage int, couleur text, manches text,
-     carton_code text, tailles_json jsonb, counted_by uuid (ou text), created_at timestamp default now()
-*/
-
-async function registerUser(name, pin, pin2) {
-  name = normalizeName(name);
-  if (!name) return toast("Nom requis.");
-  if (!isPin6(pin)) return toast("PIN doit contenir 6 chiffres.");
-  if (pin !== pin2) return toast("Confirmation PIN incorrecte.");
-
-  const pin_hash = await sha256(pin);
-
-  // Vérifier existence
-  const { data: existing, error: e1 } = await sb
-    .from("app_users")
-    .select("id,name")
-    .eq("name", name)
-    .maybeSingle();
-
-  if (e1) {
-    console.error(e1);
-    return toast("Erreur lecture app_users: " + e1.message);
-  }
-  if (existing) return toast("Utilisateur existe déjà. Utilise Connexion.");
-
-  // Créer
-  const { data, error } = await sb
-    .from("app_users")
-    .insert([{ name, pin_hash }])
-    .select("id,name")
-    .single();
-
-  if (error) {
-    console.error(error);
-    return toast("Inscription échouée: " + error.message);
+  if (!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.startsWith("COLLE_")) {
+    setMsg(authMsg, "Colle ta clé Supabase anon public dans app.js (SUPABASE_ANON_KEY).", true);
+    return;
   }
 
-  const session = { user: { id: data.id, name: data.name } };
-  saveSession(session);
-  setLoggedUI(session);
-}
+  supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  setMsg(authMsg, "Prêt. Tu peux te connecter ou t’inscrire.", false);
 
-async function loginUser(name, pin) {
-  name = normalizeName(name);
-  if (!name) return toast("Nom requis.");
-  if (!isPin6(pin)) return toast("PIN doit contenir 6 chiffres.");
-
-  const pin_hash = await sha256(pin);
-
-  const { data, error } = await sb
-    .from("app_users")
-    .select("id,name,pin_hash")
-    .eq("name", name)
-    .maybeSingle();
-
-  if (error) {
-    console.error(error);
-    return toast("Connexion échouée: " + error.message);
+  // Restore session (localStorage)
+  const saved = localStorage.getItem("inv_user");
+  if (saved) {
+    try {
+      currentUser = JSON.parse(saved);
+      enterApp();
+    } catch {}
   }
-  if (!data) return toast("Utilisateur introuvable. Fais Inscription.");
 
-  if (data.pin_hash !== pin_hash) return toast("PIN incorrect.");
+  // Events
+  btnSignup.addEventListener("click", onSignup);
+  btnLogin.addEventListener("click", onLogin);
+  btnLogout.addEventListener("click", logout);
 
-  const session = { user: { id: data.id, name: data.name } };
-  saveSession(session);
-  setLoggedUI(session);
-}
+  btnScan.addEventListener("click", () => fileScan.click());
+  fileScan.addEventListener("change", onFileSelected);
 
-function logout() {
-  clearSession();
-  setLoggedUI(null);
-}
+  btnClear.addEventListener("click", clearForm);
+  btnSubmit.addEventListener("click", submitInventory);
 
-/* ====== INVENTORY FORM ====== */
-function readSizes() {
-  // Inputs attendus: <input data-size="XS"> etc
-  const sizes = {};
-  $$("[data-size]").forEach(inp => {
-    const key = inp.getAttribute("data-size");
-    const raw = (inp.value ?? "").trim();
-    if (raw === "") return;
-    const n = parseInt(raw, 10);
-    if (!Number.isNaN(n) && n >= 0) sizes[key] = n;
+  btnMC.addEventListener("click", () => setManches("MC"));
+  btnML.addEventListener("click", () => setManches("ML"));
+
+  document.querySelectorAll('input[data-size]').forEach(inp => {
+    inp.addEventListener("input", updateTotal);
   });
-  return sizes;
+
+  updateTotal();
+});
+
+/* ====== UI Helpers ====== */
+function setMsg(el, text, isError=false, isOk=false){
+  el.textContent = text || "";
+  el.className = "msg" + (isError ? " err" : isOk ? " ok" : "");
 }
 
-function calcTotal(sizesObj) {
-  return Object.values(sizesObj).reduce((a, b) => a + (Number(b) || 0), 0);
+function safeDiag(line){
+  if (!diagBox) return;
+  const t = new Date().toISOString().replace("T"," ").slice(0,19);
+  diagBox.textContent += `[${t}] ${line}\n`;
 }
 
-function getManches() {
-  // boutons radio / toggle: #btnMC #btnML ou select #manches
-  const sel = $("#manches");
-  if (sel) return (sel.value || "").trim();
+function enterApp(){
+  authCard.classList.add("hidden");
+  appCard.classList.remove("hidden");
+  userChip.classList.remove("hidden");
+  btnLogout.classList.remove("hidden");
+  userName.textContent = currentUser?.name || "—";
+  setMsg(scanMsg, "Prêt. Clique sur Scanner 📸", false);
+}
 
-  const mc = $("#btnMC");
-  const ml = $("#btnML");
-  // si tu as un système de "selected" class
-  if (mc?.classList.contains("selected")) return "MC";
-  if (ml?.classList.contains("selected")) return "ML";
+function logout(){
+  localStorage.removeItem("inv_user");
+  currentUser = null;
+  authCard.classList.remove("hidden");
+  appCard.classList.add("hidden");
+  userChip.classList.add("hidden");
+  btnLogout.classList.add("hidden");
+  setMsg(authMsg, "Déconnecté.", false);
+}
 
-  // fallback: checkbox
-  const mcChk = $("#mc");
-  const mlChk = $("#ml");
-  if (mcChk?.checked) return "MC";
-  if (mlChk?.checked) return "ML";
+function setManches(v){
+  manchesValue = v;
+  btnMC.classList.toggle("active", v==="MC");
+  btnML.classList.toggle("active", v==="ML");
+}
 
+/* ====== AUTH ====== */
+function normalizeName(s){
+  return (s || "").trim().replace(/\s+/g, " ");
+}
+
+function pinOk(pin){
+  return /^\d{6}$/.test(pin || "");
+}
+
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+async function onSignup(){
+  try{
+    const name = normalizeName(authName.value);
+    const pin  = (authPin.value || "").trim();
+    const pin2 = (authPin2.value || "").trim();
+
+    if (!name) return setMsg(authMsg, "Nom requis.", true);
+    if (!pinOk(pin)) return setMsg(authMsg, "PIN invalide (6 chiffres).", true);
+    if (pin !== pin2) return setMsg(authMsg, "Confirmation PIN différente.", true);
+
+    setMsg(authMsg, "Inscription…", false);
+
+    // Check existing
+    const { data: existing, error: e1 } = await supa
+      .from("app_users")
+      .select("id,name")
+      .ilike("name", name)
+      .limit(1);
+
+    if (e1) return setMsg(authMsg, `Erreur app_users: ${e1.message}`, true);
+    if (existing && existing.length) return setMsg(authMsg, "Ce nom existe déjà. Utilise Connecter.", true);
+
+    const pin_hash = await sha256Hex(pin);
+
+    // Insert (essaie pin_hash, sinon fallback pin si colonne différente)
+    let ins = await supa.from("app_users").insert({ name, pin_hash }).select("id,name").single();
+    if (ins.error && /column .*pin_hash/i.test(ins.error.message)) {
+      ins = await supa.from("app_users").insert({ name, pin }).select("id,name").single();
+    }
+    if (ins.error) return setMsg(authMsg, `Inscription KO: ${ins.error.message}`, true);
+
+    currentUser = { id: ins.data.id, name: ins.data.name };
+    localStorage.setItem("inv_user", JSON.stringify(currentUser));
+
+    setMsg(authMsg, "Inscription OK ✅", false, true);
+    enterApp();
+  } catch(err){
+    setMsg(authMsg, `Erreur inscription: ${err?.message || err}`, true);
+  }
+}
+
+async function onLogin(){
+  try{
+    const name = normalizeName(authName.value);
+    const pin  = (authPin.value || "").trim();
+
+    if (!name) return setMsg(authMsg, "Nom requis.", true);
+    if (!pinOk(pin)) return setMsg(authMsg, "PIN invalide (6 chiffres).", true);
+
+    setMsg(authMsg, "Connexion…", false);
+
+    // Récupère user (essaie pin_hash, sinon pin)
+    let q = await supa.from("app_users").select("id,name,pin_hash,pin").ilike("name", name).limit(1);
+    if (q.error) return setMsg(authMsg, `Erreur app_users: ${q.error.message}`, true);
+
+    const u = q.data?.[0];
+    if (!u) return setMsg(authMsg, "Utilisateur introuvable. Utilise Inscrire.", true);
+
+    if (u.pin_hash) {
+      const pin_hash = await sha256Hex(pin);
+      if (pin_hash !== u.pin_hash) return setMsg(authMsg, "PIN incorrect.", true);
+    } else if (u.pin) {
+      if (String(u.pin) !== pin) return setMsg(authMsg, "PIN incorrect.", true);
+    } else {
+      return setMsg(authMsg, "Schéma app_users inattendu (pas de pin/pin_hash).", true);
+    }
+
+    currentUser = { id: u.id, name: u.name };
+    localStorage.setItem("inv_user", JSON.stringify(currentUser));
+
+    setMsg(authMsg, "Connexion OK ✅", false, true);
+    enterApp();
+  } catch(err){
+    setMsg(authMsg, `Erreur connexion: ${err?.message || err}`, true);
+  }
+}
+
+/* ====== TOTAL ====== */
+function toIntSafe(v){
+  if (v === "" || v == null) return 0;
+  const n = parseInt(String(v).replace(/[^\d]/g,""), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function updateTotal(){
+  let total = 0;
+  document.querySelectorAll('input[data-size]').forEach(inp => {
+    total += toIntSafe(inp.value);
+  });
+  totalCartonEl.textContent = String(total);
+}
+
+/* ====== CLEAR ====== */
+function clearForm(){
+  designation.value = "";
+  reference.value = "";
+  grammage.value = "";
+  couleur.value = "";
+  codeCarton.value = "";
+  setManches("");
+  document.querySelectorAll('input[data-size]').forEach(inp => inp.value = "");
+  updateTotal();
+  setMsg(scanMsg, "Vidé. Tu peux Scanner 📸", false);
+}
+
+/* ====== SUBMIT INVENTORY ====== */
+async function submitInventory(){
+  try{
+    if (!currentUser) return setMsg(scanMsg, "Non connecté.", true);
+
+    const rec = cleanRef(reference.value);
+    const des = cleanFree(designation.value);
+    const col = cleanFree(couleur.value);
+    const gsm = cleanDigits(grammage.value);
+    const code = cleanFree(codeCarton.value);
+
+    if (!rec) return setMsg(scanMsg, "Référence requise.", true);
+    if (!manchesValue) return setMsg(scanMsg, "Choisis MC ou ML.", true);
+
+    const tailles = {};
+    document.querySelectorAll('input[data-size]').forEach(inp => {
+      const k = inp.getAttribute("data-size");
+      const q = toIntSafe(inp.value);
+      if (q > 0) tailles[k] = q;
+    });
+
+    const total = Object.values(tailles).reduce((a,b)=>a+b,0);
+
+    const payload = {
+      designation: des,
+      ref: rec,
+      couleur: col,
+      grammage: gsm ? parseInt(gsm,10) : null,
+      manches: manchesValue,
+      code_carton: code || null,
+      tailles_json: tailles,
+      total_carton: total,
+      counted_by: currentUser.name
+    };
+
+    setMsg(scanMsg, "Envoi…", false);
+
+    const { error } = await supa.from("inventory_counts").insert(payload);
+    if (error) return setMsg(scanMsg, `Envoi KO: ${error.message}`, true);
+
+    setMsg(scanMsg, "Enregistré ✅", false, true);
+    clearForm();
+  } catch(err){
+    setMsg(scanMsg, `Erreur envoi: ${err?.message || err}`, true);
+  }
+}
+
+/* ====== SCAN & OCR ====== */
+async function onFileSelected(){
+  const file = fileScan.files?.[0];
+  fileScan.value = ""; // reset
+  if (!file) return;
+
+  try{
+    setMsg(scanMsg, "Photo reçue. Recadrage…", false);
+
+    // createImageBitmap respecte l’orientation EXIF (super important sur mobile)
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+
+    // 1) Draw to canvas
+    const base = document.createElement("canvas");
+    base.width = bmp.width;
+    base.height = bmp.height;
+    const bctx = base.getContext("2d", { willReadFrequently:true });
+    bctx.drawImage(bmp, 0, 0);
+
+    // 2) Auto-crop sur le cadre noir de l’étiquette
+    const cropped = autoCropToLabelFrame(base);
+    setMsg(scanMsg, "OCR… (patiente 5-15s selon le téléphone)", false);
+
+    // 3) OCR par zones (sur l’image recadrée)
+    const W = cropped.width, H = cropped.height;
+
+    // ZONES (à partir du cadre complet)
+    // Ajustées pour éviter les libellés imprimés (on vise la zone écrite)
+    const zones = {
+      designation: { x:0.18, y:0.12, w:0.50, h:0.12 },
+      grammage:    { x:0.74, y:0.12, w:0.22, h:0.12 },
+      reference:   { x:0.10, y:0.28, w:0.86, h:0.12 },
+      couleur:     { x:0.18, y:0.44, w:0.50, h:0.10 },
+      manches:     { x:0.77, y:0.44, w:0.18, h:0.10 }
+    };
+
+    const des = await ocrZone(cropped, zones.designation, { mode:"free" });
+    const gsm = await ocrZone(cropped, zones.grammage,    { mode:"digits" });
+    const ref = await ocrZone(cropped, zones.reference,   { mode:"ref" });
+    const col = await ocrZone(cropped, zones.couleur,     { mode:"free" });
+    const man = await ocrZone(cropped, zones.manches,     { mode:"manches" });
+
+    // Fill fields
+    if (des) designation.value = des;
+    if (gsm) grammage.value = gsm;
+    if (ref) reference.value = ref;
+    if (col) couleur.value = col;
+
+    if (man === "MC" || man === "ML") setManches(man);
+
+    updateTotal();
+    setMsg(scanMsg, "Scan OK. Vérifie/corrige puis Valider & Envoyer.", false, true);
+  } catch(err){
+    setMsg(scanMsg, `Scan KO: ${err?.message || err}`, true);
+  }
+}
+
+/* ====== OCR utils ====== */
+async function ocrZone(canvas, z, opt){
+  const rect = {
+    x: Math.round(z.x * canvas.width),
+    y: Math.round(z.y * canvas.height),
+    w: Math.round(z.w * canvas.width),
+    h: Math.round(z.h * canvas.height),
+  };
+
+  // Extract zone into subcanvas + upscale (aide beaucoup l’OCR)
+  const sub = document.createElement("canvas");
+  sub.width = rect.w * 2;
+  sub.height = rect.h * 2;
+  const sctx = sub.getContext("2d", { willReadFrequently:true });
+
+  // simple preprocessing: grayscale + contrast via draw then threshold
+  sctx.imageSmoothingEnabled = false;
+  sctx.drawImage(canvas, rect.x, rect.y, rect.w, rect.h, 0, 0, sub.width, sub.height);
+
+  // threshold
+  const img = sctx.getImageData(0,0,sub.width, sub.height);
+  const d = img.data;
+  for (let i=0;i<d.length;i+=4){
+    const r=d[i], g=d[i+1], b=d[i+2];
+    const gray = (r*0.299 + g*0.587 + b*0.114);
+    const v = gray < 170 ? 0 : 255; // ajustable
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  sctx.putImageData(img,0,0);
+
+  // OCR
+  const lang = "eng"; // léger; ok pour chiffres/lettres
+  const cfg = {
+    tessedit_pageseg_mode: 6
+  };
+
+  let whitelist = null;
+  if (opt?.mode === "digits") whitelist = "0123456789";
+  if (opt?.mode === "ref") whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+  if (opt?.mode === "manches") whitelist = "MCL";
+  if (whitelist) cfg.tessedit_char_whitelist = whitelist;
+
+  const res = await Tesseract.recognize(sub, lang, { logger: () => {} , ...cfg });
+  const raw = (res?.data?.text || "").replace(/\n/g," ").trim();
+
+  // Clean according to mode
+  if (opt?.mode === "digits") return cleanDigits(raw);
+  if (opt?.mode === "ref") return cleanRef(raw);
+  if (opt?.mode === "manches") return cleanManches(raw);
+  return cleanFree(raw);
+}
+
+function cleanFree(s){
+  return (s || "")
+    .replace(/[|]/g,"")
+    .replace(/\s+/g," ")
+    .trim()
+    .slice(0, 60);
+}
+
+function cleanDigits(s){
+  const out = (s || "").replace(/[^\d]/g,"").trim();
+  // évite le “1” seul quand c’est un bruit
+  if (out.length === 1) return "";
+  return out.slice(0, 4);
+}
+
+function cleanRef(s){
+  return (s || "")
+    .toUpperCase()
+    .replace(/\s+/g,"")
+    .replace(/[^A-Z0-9-]/g,"")
+    .replace(/I/g,"1") // ton règle
+    .slice(0, 20);
+}
+
+function cleanManches(s){
+  const t = (s || "").toUpperCase().replace(/[^A-Z]/g,"");
+  if (t.includes("MC")) return "MC";
+  if (t.includes("ML")) return "ML";
+  // parfois l'OCR sort juste "M"
+  if (t === "M") return "";
   return "";
 }
 
-function setManches(val) {
-  const sel = $("#manches");
-  if (sel) {
-    sel.value = val;
-    return;
-  }
-  const mc = $("#btnMC");
-  const ml = $("#btnML");
-  if (mc && ml) {
-    mc.classList.toggle("selected", val === "MC");
-    ml.classList.toggle("selected", val === "ML");
-  }
-}
+/* ====== AUTO CROP (cadre noir) ======
+   On cherche la zone la plus "noire" (traits du cadre),
+   puis on recadre. Ça stabilise les zones OCR.
+===================================== */
+function autoCropToLabelFrame(canvas){
+  const ctx = canvas.getContext("2d", { willReadFrequently:true });
+  const { width:W, height:H } = canvas;
 
-async function submitInventory() {
-  const session = loadSession();
-  if (!session?.user?.id) return toast("Connecte-toi d'abord.");
+  // Downscale pour analyse rapide
+  const s = 0.25; // 25% suffit
+  const w = Math.max(200, Math.round(W*s));
+  const h = Math.max(200, Math.round(H*s));
 
-  const designation = getValue("#designation");
-  const ref = getValue("#ref");
-  const grammageRaw = getValue("#grammage");
-  const couleur = getValue("#couleur");
-  const manches = getManches();
-  const carton_code = getValue("#cartonCode");
+  const tmp = document.createElement("canvas");
+  tmp.width = w; tmp.height = h;
+  const tctx = tmp.getContext("2d", { willReadFrequently:true });
+  tctx.drawImage(canvas, 0,0, W,H, 0,0, w,h);
 
-  const tailles_json = readSizes();
-  const total = calcTotal(tailles_json);
+  const img = tctx.getImageData(0,0,w,h);
+  const d = img.data;
 
-  const grammage = grammageRaw ? parseInt(grammageRaw, 10) : null;
-  if (grammageRaw && Number.isNaN(grammage)) return toast("Grammage invalide.");
-
-  if (!ref) return toast("Référence obligatoire.");
-  if (!manches) return toast("Manches obligatoire (MC ou ML).");
-  if (total <= 0) return toast("Aucune quantité saisie.");
-
-  const payload = {
-    designation: designation || null,
-    ref,
-    grammage,
-    couleur: couleur || null,
-    manches,
-    carton_code: carton_code || null,
-    tailles_json,
-    counted_by: session.user.id
+  // helper: count dark pixels in a column/row (sampling)
+  const colDarkRatio = (x) => {
+    let dark=0, total=0;
+    for (let y=0;y<h;y+=2){
+      const i = (y*w + x)*4;
+      const gray = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+      if (gray < 140) dark++;
+      total++;
+    }
+    return dark/total;
   };
 
-  const { error } = await sb.from("inventory_counts").insert([payload]);
-
-  if (error) {
-    console.error(error);
-    return toast("Envoi échoué: " + error.message);
-  }
-
-  toast("Enregistré ✅");
-  // reset quantités (option)
-  $$("[data-size]").forEach(inp => (inp.value = ""));
-  setText("#totalCarton", "0");
-}
-
-/* ====== OCR PAR ZONES ======
-   Principe:
-   - on prend une photo
-   - on "crop" des rectangles fixes (en %) -> zones texte
-   - Tesseract sur chaque crop
-   - on remplit les champs
-   NOTE: il faut une étiquette TOUJOURS cadrée pareil (verticale, A5)
-*/
-
-function ensureTesseract() {
-  if (!window.Tesseract || typeof window.Tesseract.recognize !== "function") {
-    toast("Tesseract non chargé (check <script tesseract> dans index.html)");
-    return false;
-  }
-  return true;
-}
-
-function createCanvasFromImage(img) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  canvas.width = img.naturalWidth || img.width;
-  canvas.height = img.naturalHeight || img.height;
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return { canvas, ctx };
-}
-
-function cropCanvas(srcCanvas, rectPct) {
-  const { x, y, w, h } = rectPct;
-  const sw = srcCanvas.width, sh = srcCanvas.height;
-
-  const rx = Math.round(x * sw);
-  const ry = Math.round(y * sh);
-  const rw = Math.round(w * sw);
-  const rh = Math.round(h * sh);
-
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, rw);
-  c.height = Math.max(1, rh);
-  const ctx = c.getContext("2d");
-  ctx.drawImage(srcCanvas, rx, ry, rw, rh, 0, 0, c.width, c.height);
-  return c;
-}
-
-async function ocrCanvas(canvas, opts = {}) {
-  const {
-    lang = "eng",
-    whitelist = null
-  } = opts;
-
-  const cfg = {};
-  if (whitelist) cfg.tessedit_char_whitelist = whitelist;
-
-  const { data } = await window.Tesseract.recognize(canvas, lang, {
-    logger: () => {},
-    ...cfg
-  });
-
-  return (data?.text || "").trim();
-}
-
-function cleanText(t) {
-  return (t || "")
-    .replace(/\s+/g, " ")
-    .replace(/[|]/g, "I")
-    .trim();
-}
-
-function cleanRef(t) {
-  // garde lettres+chiffres
-  return cleanText(t).toUpperCase().replace(/[^A-Z0-9-]/g, "");
-}
-
-function cleanNumber(t) {
-  const m = (t || "").match(/\d+/);
-  return m ? m[0] : "";
-}
-
-/* Zones en % (à ajuster si ton template change)
-   Référence : ton étiquette A5 "ETIQUETTE INVENTAIRE CARTON"
-   Les champs manuscrits sont dans les cases à droite.
-*/
-const ZONES = {
-  designation: { x: 0.38, y: 0.16, w: 0.56, h: 0.08 },
-  ref:         { x: 0.38, y: 0.26, w: 0.56, h: 0.08 },
-  couleur:     { x: 0.38, y: 0.36, w: 0.56, h: 0.08 },
-  grammage:    { x: 0.38, y: 0.46, w: 0.56, h: 0.08 },
-  manches:     { x: 0.38, y: 0.56, w: 0.56, h: 0.08 }
-};
-
-async function scanLabelFromFile(file) {
-  const session = loadSession();
-  if (!session?.user?.id) return toast("Connecte-toi d'abord.");
-  if (!ensureTesseract()) return;
-
-  setText("#scanStatus", "Scan en cours…");
-
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-
-  await new Promise((res, rej) => {
-    img.onload = res;
-    img.onerror = rej;
-  });
-
-  const { canvas } = createCanvasFromImage(img);
-
-  // OCR zone par zone (plus fiable qu’un OCR global)
-  try {
-    const cDesignation = cropCanvas(canvas, ZONES.designation);
-    const cRef = cropCanvas(canvas, ZONES.ref);
-    const cCouleur = cropCanvas(canvas, ZONES.couleur);
-    const cGrammage = cropCanvas(canvas, ZONES.grammage);
-    const cManches = cropCanvas(canvas, ZONES.manches);
-
-    const [tDesignation, tRef, tCouleur, tGrammage, tManches] = await Promise.all([
-      ocrCanvas(cDesignation, { lang: "eng" }),
-      ocrCanvas(cRef,         { lang: "eng", whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-" }),
-      ocrCanvas(cCouleur,     { lang: "eng" }),
-      ocrCanvas(cGrammage,    { lang: "eng", whitelist: "0123456789" }),
-      ocrCanvas(cManches,     { lang: "eng", whitelist: "MCLmcl" })
-    ]);
-
-    const designation = cleanText(tDesignation);
-    const ref = cleanRef(tRef);
-    const couleur = cleanText(tCouleur);
-    const grammage = cleanNumber(tGrammage);
-
-    // manches : détecte MC / ML
-    const m = cleanText(tManches).toUpperCase();
-    let manches = "";
-    if (m.includes("MC")) manches = "MC";
-    if (m.includes("ML")) manches = "ML";
-
-    // Remplissage UI
-    if (designation) setValue("#designation", designation);
-    if (ref) setValue("#ref", ref);
-    if (couleur) setValue("#couleur", couleur);
-    if (grammage) setValue("#grammage", grammage);
-    if (manches) setManches(manches);
-
-    setText("#scanStatus", "Scan OK. Vérifie/corrige puis Valider & Envoyer.");
-  } catch (e) {
-    console.error(e);
-    setText("#scanStatus", "Scan échoué. Essaie lumière forte + étiquette bien cadrée.");
-    toast("OCR échoué: " + e.message);
-  } finally {
-    URL.revokeObjectURL(img.src);
-  }
-}
-
-/* ====== BIND UI ====== */
-function bindUI() {
-  // Auth buttons
-  $("#btnRegister")?.addEventListener("click", async () => {
-    if (!sb && !initSupabase()) return;
-    const name = getValue("#regName");
-    const pin = getValue("#regPin");
-    const pin2 = getValue("#regPin2");
-    await registerUser(name, pin, pin2);
-  });
-
-  $("#btnLogin")?.addEventListener("click", async () => {
-    if (!sb && !initSupabase()) return;
-    const name = getValue("#loginName");
-    const pin = getValue("#loginPin");
-    await loginUser(name, pin);
-  });
-
-  $("#btnLogout")?.addEventListener("click", () => logout());
-
-  // Manches toggle (option)
-  $("#btnMC")?.addEventListener("click", () => setManches("MC"));
-  $("#btnML")?.addEventListener("click", () => setManches("ML"));
-
-  // Total carton live
-  const updateTotal = () => {
-    const total = calcTotal(readSizes());
-    setText("#totalCarton", String(total));
+  const rowDarkRatio = (y) => {
+    let dark=0, total=0;
+    for (let x=0;x<w;x+=2){
+      const i = (y*w + x)*4;
+      const gray = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+      if (gray < 140) dark++;
+      total++;
+    }
+    return dark/total;
   };
-  $$("[data-size]").forEach(inp => inp.addEventListener("input", updateTotal));
 
-  // Submit inventory
-  $("#btnSubmit")?.addEventListener("click", async () => {
-    if (!sb && !initSupabase()) return;
-    await submitInventory();
-  });
+  // seuils (cadre épais => ratio noir assez haut)
+  const TH_COL = 0.12;
+  const TH_ROW = 0.10;
 
-  // Scanner
-  // input file attendu: <input id="scanInput" type="file" accept="image/*" capture="environment">
-  $("#scanBtn")?.addEventListener("click", () => $("#scanInput")?.click());
+  let left=0, right=w-1, top=0, bottom=h-1;
 
-  $("#scanInput")?.addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await scanLabelFromFile(file);
-    e.target.value = ""; // reset
-  });
+  for (let x=0;x<w;x++){
+    if (colDarkRatio(x) > TH_COL) { left=x; break; }
+  }
+  for (let x=w-1;x>=0;x--){
+    if (colDarkRatio(x) > TH_COL) { right=x; break; }
+  }
+  for (let y=0;y<h;y++){
+    if (rowDarkRatio(y) > TH_ROW) { top=y; break; }
+  }
+  for (let y=h-1;y>=0;y--){
+    if (rowDarkRatio(y) > TH_ROW) { bottom=y; break; }
+  }
+
+  // padding
+  const pad = 8;
+  left   = Math.max(0, left - pad);
+  top    = Math.max(0, top - pad);
+  right  = Math.min(w-1, right + pad);
+  bottom = Math.min(h-1, bottom + pad);
+
+  const cw = right-left;
+  const ch = bottom-top;
+
+  // Si crop incohérent, on retourne l'image originale
+  if (cw < w*0.4 || ch < h*0.4) return canvas;
+
+  // convert back to full-res coords
+  const scaleX = W / w;
+  const scaleY = H / h;
+
+  const X = Math.round(left * scaleX);
+  const Y = Math.round(top * scaleY);
+  const CW = Math.round(cw * scaleX);
+  const CH = Math.round(ch * scaleY);
+
+  const out = document.createElement("canvas");
+  out.width = CW;
+  out.height = CH;
+  out.getContext("2d").drawImage(canvas, X, Y, CW, CH, 0, 0, CW, CH);
+
+  return out;
 }
-
-/* ====== BOOT ====== */
-(function boot() {
-  // init supabase (non bloquant : si config manquante, il alerte)
-  initSupabase();
-
-  bindUI();
-
-  // Restaurer session si existe
-  const session = loadSession();
-  setLoggedUI(session);
-
-  // Check “SDK loaded” pour éviter les surprises
-  if (!window.supabase?.createClient) {
-    console.warn("Supabase SDK absent: vérifie index.html");
-  }
-  if (!window.Tesseract?.recognize) {
-    console.warn("Tesseract absent: vérifie index.html");
-  }
-})();
