@@ -1,402 +1,446 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+/***********************
+ * CONFIG
+ ***********************/
+const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co"; // ex: https://xxxx.supabase.co
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
 
-/**
- * CONFIG SUPABASE
- * Remplace les 2 lignes ci-dessous par tes infos.
- * (URL du projet + anon key)
- */
-const SUPABASE_URL = "COLLE_TON_SUPABASE_URL_ICI";
-const SUPABASE_ANON_KEY = "COLLE_TON_SUPABASE_ANON_KEY_ICI";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Table cible
-const TABLE = "inventory";
+/***********************
+ * UTIL
+ ***********************/
+const $ = (id) => document.getElementById(id);
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// === UI refs ===
-const netDot = document.getElementById("netDot");
-const netTxt = document.getElementById("netTxt");
-
-const comptePar = document.getElementById("comptePar");
-const otherNameWrap = document.getElementById("otherNameWrap");
-const otherName = document.getElementById("otherName");
-const whoBadge = document.getElementById("whoBadge");
-
-const cartonCode = document.getElementById("cartonCode");
-const designation = document.getElementById("designation");
-const grammage = document.getElementById("grammage");
-const ref = document.getElementById("ref");
-const couleur = document.getElementById("couleur");
-const remarque = document.getElementById("remarque");
-
-const btnMC = document.getElementById("btnMC");
-const btnML = document.getElementById("btnML");
-const manchesBadge = document.getElementById("manchesBadge");
-
-const sizesGrid = document.getElementById("sizesGrid");
-const totalBig = document.getElementById("totalBig");
-
-const btnSend = document.getElementById("btnSend");
-const btnClear = document.getElementById("btnClear");
-const btnLogout = document.getElementById("btnLogout");
-
-const historyList = document.getElementById("historyList");
-const histCount = document.getElementById("histCount");
-
-// Toast
-const toast = document.getElementById("toast");
-const toastIco = document.getElementById("toastIco");
-const toastTitle = document.getElementById("toastTitle");
-const toastMsg = document.getElementById("toastMsg");
-let toastTimer = null;
-
-function showToast(type, title, msg){
-  clearTimeout(toastTimer);
-  toastIco.className = "ico " + (type || "warn");
-  toastTitle.textContent = title || "Info";
-  toastMsg.textContent = msg || "";
-  toast.classList.add("show");
-  toastTimer = setTimeout(()=>toast.classList.remove("show"), 3200);
+function normName(s){
+  return (s || "").trim();
 }
 
-// === Network indicator ===
-function updateNet(){
-  const ok = navigator.onLine;
-  netDot.className = "dot " + (ok ? "ok" : "bad");
-  netTxt.textContent = ok ? "En ligne" : "Hors ligne";
-}
-window.addEventListener("online", updateNet);
-window.addEventListener("offline", updateNet);
-updateNet();
-
-// === Local user + history ===
-const LS_USER = "inv_user_name";
-const LS_HISTORY = "inv_history";
-
-function getUser(){ return localStorage.getItem(LS_USER) || ""; }
-function setUser(name){
-  localStorage.setItem(LS_USER, name);
-  whoBadge.textContent = name ? ("Connecté: " + name) : "Non connecté";
+function isValidPin(pin){
+  return /^\d{6}$/.test(pin);
 }
 
-function getSelectedName(){
-  const v = comptePar.value;
-  if(v === "__other__") return (otherName.value || "").trim();
-  return (v || "").trim();
+// Hash simple côté client (pas parfait, mais OK pour votre besoin "atelier")
+// Pour plus solide: RPC côté serveur ou auth. Là on vise vitesse.
+async function sha256(str){
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-function updateWhoBadge(){
-  const nm = getSelectedName() || getUser();
-  whoBadge.textContent = nm ? ("Connecté: " + nm) : "Non connecté";
+function onlyIntOrEmpty(v){
+  const s = (v || "").toString().trim();
+  if(s === "") return "";
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? String(n) : "";
 }
 
-comptePar.addEventListener("change", ()=>{
-  otherNameWrap.classList.toggle("hidden", comptePar.value !== "__other__");
-  const nm = getSelectedName();
-  if(nm){
-    setUser(nm);
-    showToast("ok", "Nom enregistré", nm);
+function setMsg(el, text, cls){
+  el.className = "msg " + (cls || "");
+  el.textContent = text || "";
+}
+
+function normalizeRef(ref){
+  // règle anti confusion: I = 1
+  // et suppression espaces
+  return (ref || "")
+    .trim()
+    .toUpperCase()
+    .replaceAll(" ", "")
+    .replaceAll("I", "1");
+}
+
+/***********************
+ * SESSION (local)
+ ***********************/
+const SESSION_KEY = "inv_session_v1";
+
+function setSession(session){
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+function getSession(){
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
+  catch { return null; }
+}
+function clearSession(){
+  localStorage.removeItem(SESSION_KEY);
+}
+
+/***********************
+ * UI refs
+ ***********************/
+const viewLogin = $("viewLogin");
+const viewApp = $("viewApp");
+
+const loginName = $("loginName");
+const loginPin = $("loginPin");
+const btnLogin = $("btnLogin");
+const loginMsg = $("loginMsg");
+
+const userBadge = $("userBadge");
+const btnLogout = $("btnLogout");
+
+const f_designation = $("f_designation");
+const f_ref = $("f_ref");
+const f_grammage = $("f_grammage");
+const f_couleur = $("f_couleur");
+const f_carton = $("f_carton");
+const btnMC = $("btnMC");
+const btnML = $("btnML");
+
+const btnCalcTotal = $("btnCalcTotal");
+const totalCartonEl = $("totalCarton");
+const btnSave = $("btnSave");
+const saveMsg = $("saveMsg");
+
+const filterRef = $("filterRef");
+const filterCouleur = $("filterCouleur");
+const filterManches = $("filterManches");
+const btnRefresh = $("btnRefresh");
+const btnExportCsv = $("btnExportCsv");
+const stockMsg = $("stockMsg");
+const stockTableBody = $("stockTable").querySelector("tbody");
+
+let manchesSelected = "MC";
+
+/***********************
+ * MANCHES selector
+ ***********************/
+function setManches(val){
+  manchesSelected = val;
+  btnMC.classList.toggle("active", val === "MC");
+  btnML.classList.toggle("active", val === "ML");
+}
+btnMC.addEventListener("click", () => setManches("MC"));
+btnML.addEventListener("click", () => setManches("ML"));
+setManches("MC");
+
+/***********************
+ * LOGIN FLOW
+ ***********************/
+async function loginOrRegister(){
+  setMsg(loginMsg, "", "");
+  const name = normName(loginName.value);
+  const pin = (loginPin.value || "").trim();
+
+  if(!name){
+    setMsg(loginMsg, "Nom requis.", "bad");
+    return;
   }
-  updateWhoBadge();
-});
-
-otherName.addEventListener("input", ()=>{
-  const nm = getSelectedName();
-  if(nm){
-    setUser(nm);
-    updateWhoBadge();
-  }
-});
-
-// restore saved user
-const saved = getUser();
-if(saved){
-  const options = [...comptePar.options].map(o => (o.value || o.textContent));
-  if(options.includes(saved)){
-    comptePar.value = saved;
-  } else {
-    comptePar.value = "__other__";
-    otherNameWrap.classList.remove("hidden");
-    otherName.value = saved;
-  }
-  setUser(saved);
-}
-updateWhoBadge();
-
-// === Normalisation REF (I->1, O->0 dans la partie numérique) ===
-function normalizeRef(raw){
-  let x = (raw || "").toUpperCase().replace(/\s+/g,"");
-  if(!x) return x;
-  const m = x.match(/^([A-Z]+)(.*)$/);
-  if(!m) return x;
-  const prefix = m[1];
-  let rest = m[2] || "";
-  rest = rest.replace(/I/g,"1").replace(/O/g,"0");
-  return prefix + rest;
-}
-ref.addEventListener("blur", ()=>{ ref.value = normalizeRef(ref.value); });
-
-// === Sizes ===
-const SIZES = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL"];
-const sizeInputs = new Map();
-
-function buildSizes(){
-  sizesGrid.innerHTML = "";
-  for(const s of SIZES){
-    const box = document.createElement("div");
-    box.className = "sizeBox";
-
-    const k = document.createElement("div");
-    k.className = "k";
-    k.textContent = s;
-
-    const inp = document.createElement("input");
-    inp.inputMode = "numeric";
-    inp.placeholder = "0";
-    inp.dataset.size = s;
-
-    inp.addEventListener("input", ()=>{
-      inp.value = inp.value.replace(/[^\d]/g,"");
-      computeTotal();
-    });
-
-    inp.addEventListener("keydown", (e)=>{
-      if(e.key === "Enter"){
-        e.preventDefault();
-        focusNextSize(s);
-      }
-    });
-
-    box.appendChild(k);
-    box.appendChild(inp);
-    sizesGrid.appendChild(box);
-    sizeInputs.set(s, inp);
-  }
-}
-
-function focusNextSize(current){
-  const idx = SIZES.indexOf(current);
-  if(idx >= 0 && idx < SIZES.length - 1){
-    const nxt = sizeInputs.get(SIZES[idx+1]);
-    nxt.focus();
-    if(nxt.select) nxt.select();
-  } else {
-    btnSend.focus();
-  }
-}
-
-function computeTotal(){
-  let t = 0;
-  for(const s of SIZES){
-    const v = parseInt(sizeInputs.get(s).value || "0", 10);
-    t += (Number.isFinite(v) ? v : 0);
-  }
-  totalBig.textContent = String(t);
-  return t;
-}
-
-buildSizes();
-computeTotal();
-
-// === Manches ===
-let manches = "";
-function setManches(v){
-  manches = v;
-  btnMC.classList.toggle("active", v === "MC");
-  btnML.classList.toggle("active", v === "ML");
-  manchesBadge.textContent = "MANCHES: " + (v || "—");
-}
-btnMC.addEventListener("click", ()=>setManches("MC"));
-btnML.addEventListener("click", ()=>setManches("ML"));
-
-// === History local ===
-function escapeHtml(s){
-  return (s||"").replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[c]));
-}
-
-function loadHistory(){
-  try{
-    const arr = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
-    return Array.isArray(arr) ? arr : [];
-  }catch{
-    return [];
-  }
-}
-
-function saveHistory(arr){
-  localStorage.setItem(LS_HISTORY, JSON.stringify(arr.slice(0, 30)));
-  renderHistory();
-}
-
-function pushHistory(item){
-  const arr = loadHistory();
-  arr.unshift(item);
-  saveHistory(arr);
-}
-
-function renderHistory(){
-  const arr = loadHistory();
-  histCount.textContent = String(arr.length);
-  historyList.innerHTML = "";
-
-  if(arr.length === 0){
-    const li = document.createElement("li");
-    li.innerHTML = `
-      <div class="left">
-        <div class="a">Aucune saisie</div>
-        <div class="b">Les dernières saisies apparaîtront ici.</div>
-      </div>
-      <div class="right"><span class="badge">—</span></div>
-    `;
-    historyList.appendChild(li);
+  if(!isValidPin(pin)){
+    setMsg(loginMsg, "PIN invalide (6 chiffres).", "bad");
     return;
   }
 
-  for(const it of arr){
-    const li = document.createElement("li");
-    const a = `${it.ref} • ${it.couleur} • ${it.manches}`;
-    const b = `${it.compte_par} • ${it.carton_code || "—"} • ${new Date(it.created_at).toLocaleString()}`;
-    li.innerHTML = `
-      <div class="left">
-        <div class="a">${escapeHtml(a)}</div>
-        <div class="b">${escapeHtml(b)}</div>
-      </div>
-      <div class="right">
-        <div style="font-weight:900; font-size:16px;">${it.total}</div>
-        <div class="badge">Envoyé</div>
-      </div>
-    `;
-    historyList.appendChild(li);
-  }
-}
-renderHistory();
+  const pin_hash = await sha256(pin);
 
-// === Reset form ===
-function resetForm(keepUser=true){
-  cartonCode.value = "";
-  designation.value = "";
-  grammage.value = "";
-  ref.value = "";
-  couleur.value = "";
-  remarque.value = "";
-  setManches("");
+  // 1) check user exists
+  const { data: existing, error: e1 } = await db
+    .from("app_users")
+    .select("id,name,pin_hash")
+    .eq("name", name)
+    .maybeSingle();
 
-  for(const s of SIZES){
-    sizeInputs.get(s).value = "";
-  }
-  computeTotal();
-
-  if(!keepUser){
-    comptePar.value = "";
-    otherNameWrap.classList.add("hidden");
-    otherName.value = "";
-    localStorage.removeItem(LS_USER);
-  }
-  ref.focus();
-}
-
-btnClear.addEventListener("click", ()=>resetForm(true));
-
-btnLogout.addEventListener("click", ()=>{
-  resetForm(false);
-  updateWhoBadge();
-  showToast("warn", "Nom effacé", "Choisis ton nom à nouveau.");
-});
-
-// === Send to Supabase ===
-btnSend.addEventListener("click", async ()=>{
-  const nm = getSelectedName() || getUser();
-  if(!nm){
-    showToast("bad", "Nom requis", "Choisis un nom (compte_par) avant de valider.");
-    comptePar.focus();
+  if(e1){
+    setMsg(loginMsg, "Erreur DB (lecture user).", "bad");
+    console.error(e1);
     return;
   }
 
-  const refVal = normalizeRef(ref.value);
-  if(!refVal){
-    showToast("bad", "Référence requise", "Champ REF obligatoire.");
-    ref.focus();
-    return;
-  }
+  if(!existing){
+    // create
+    const { error: e2 } = await db
+      .from("app_users")
+      .insert({ name, pin_hash });
 
-  const colVal = (couleur.value || "").trim();
-  if(!colVal){
-    showToast("bad", "Couleur requise", "Champ COULEUR obligatoire.");
-    couleur.focus();
-    return;
-  }
-
-  if(!manches){
-    showToast("bad", "Manches requises", "Sélectionne MC ou ML.");
-    btnMC.focus();
-    return;
-  }
-
-  const tailles = {};
-  let total = 0;
-  for(const s of SIZES){
-    const v = parseInt(sizeInputs.get(s).value || "0", 10);
-    const q = Number.isFinite(v) ? v : 0;
-    tailles[s] = q;
-    total += q;
-  }
-  if(total <= 0){
-    showToast("bad", "Quantités vides", "Saisis au moins une taille > 0.");
-    sizeInputs.get("L").focus();
-    return;
-  }
-
-  const g = (grammage.value || "").trim();
-  const grammageInt = g ? parseInt(g.replace(/[^\d]/g,""), 10) : null;
-
-  const payload = {
-    compte_par: nm,
-    carton_code: (cartonCode.value || "").trim() || null,
-    designation: (designation.value || "").trim() || null,
-    ref: refVal,
-    grammage: Number.isFinite(grammageInt) ? grammageInt : null,
-    couleur: colVal,
-    manches: manches,
-    tailles_json: tailles,
-    total: total,
-    remarque: (remarque.value || "").trim() || null,
-  };
-
-  try{
-    btnSend.disabled = true;
-    btnSend.textContent = "Envoi…";
-
-    const { data, error } = await supabase
-      .from(TABLE)
-      .insert(payload)
-      .select("id, created_at");
-
-    if(error){
-      if((error.message || "").toLowerCase().includes("duplicate") || error.code === "23505"){
-        showToast("bad", "Doublon carton_code", "Ce carton_code existe déjà. Change le code.");
-        cartonCode.focus();
-      } else {
-        showToast("bad", "Erreur Supabase", error.message || "Insertion impossible.");
-      }
+    if(e2){
+      setMsg(loginMsg, "Erreur DB (création user).", "bad");
+      console.error(e2);
       return;
     }
 
-    const created_at = data?.[0]?.created_at || new Date().toISOString();
-    pushHistory({ ...payload, created_at });
-    showToast("ok", "Envoyé", `${payload.ref} • Total ${payload.total} • ${payload.compte_par}`);
-
-    // reset but keep manches
-    const keepM = manches;
-    resetForm(true);
-    setManches(keepM);
-
-  } finally {
-    btnSend.disabled = false;
-    btnSend.textContent = "Valider & Envoyer";
+    setSession({ name });
+    showApp(name);
+    setMsg(loginMsg, "Utilisateur créé. Connexion OK.", "ok");
+    return;
   }
+
+  // verify pin
+  if(existing.pin_hash !== pin_hash){
+    setMsg(loginMsg, "PIN incorrect.", "bad");
+    return;
+  }
+
+  setSession({ name });
+  showApp(name);
+  setMsg(loginMsg, "Connexion OK.", "ok");
+}
+
+btnLogin.addEventListener("click", loginOrRegister);
+loginPin.addEventListener("keydown", (e) => {
+  if(e.key === "Enter") loginOrRegister();
 });
 
-// initial focus
-ref.focus();
+/***********************
+ * APP VIEW
+ ***********************/
+function showApp(name){
+  viewLogin.classList.add("hidden");
+  viewApp.classList.remove("hidden");
+  userBadge.textContent = name;
+  userBadge.classList.remove("hidden");
+  btnLogout.classList.remove("hidden");
+  setMsg(saveMsg, "", "");
+  setMsg(stockMsg, "", "");
+  refreshStock();
+}
+
+function showLogin(){
+  viewApp.classList.add("hidden");
+  viewLogin.classList.remove("hidden");
+  userBadge.classList.add("hidden");
+  btnLogout.classList.add("hidden");
+}
+
+btnLogout.addEventListener("click", () => {
+  clearSession();
+  showLogin();
+});
+
+/***********************
+ * TOTAL CALC
+ ***********************/
+function getTaillesJson(){
+  const map = {
+    "XS": onlyIntOrEmpty($("q_xs").value),
+    "S":  onlyIntOrEmpty($("q_s").value),
+    "M":  onlyIntOrEmpty($("q_m").value),
+    "L":  onlyIntOrEmpty($("q_l").value),
+    "XL": onlyIntOrEmpty($("q_xl").value),
+    "XXL": onlyIntOrEmpty($("q_xxl").value),
+    "3XL": onlyIntOrEmpty($("q_3xl").value),
+    "4XL": onlyIntOrEmpty($("q_4xl").value),
+    "5XL": onlyIntOrEmpty($("q_5xl").value),
+    "6XL": onlyIntOrEmpty($("q_6xl").value),
+    "7XL": onlyIntOrEmpty($("q_7xl").value),
+    "8XL": onlyIntOrEmpty($("q_8xl").value),
+  };
+
+  // enlever vides
+  const cleaned = {};
+  for(const k of Object.keys(map)){
+    if(map[k] !== "" && map[k] !== "0"){
+      cleaned[k] = map[k];
+    }
+  }
+  return cleaned;
+}
+
+function calcTotal(){
+  const tailles = getTaillesJson();
+  let total = 0;
+  for(const k in tailles){
+    const n = parseInt(tailles[k], 10);
+    if(Number.isFinite(n)) total += n;
+  }
+  totalCartonEl.textContent = String(total);
+  return { total, tailles };
+}
+
+btnCalcTotal.addEventListener("click", () => {
+  const { total } = calcTotal();
+  setMsg(saveMsg, `Total calculé: ${total}`, "ok");
+});
+
+/***********************
+ * SAVE CARTON -> inventory_counts
+ ***********************/
+async function saveCarton(){
+  setMsg(saveMsg, "", "");
+  const session = getSession();
+  if(!session?.name){
+    setMsg(saveMsg, "Session expirée. Reconnecte-toi.", "bad");
+    showLogin();
+    return;
+  }
+
+  // validations
+  const designation = (f_designation.value || "").trim();
+  const refRaw = (f_ref.value || "").trim();
+  const ref = normalizeRef(refRaw);
+  const grammage = (f_grammage.value || "").trim();
+  const couleur = (f_couleur.value || "").trim();
+  const carton_code = (f_carton.value || "").trim();
+
+  if(!ref){
+    setMsg(saveMsg, "Référence requise.", "bad");
+    return;
+  }
+  if(!couleur){
+    setMsg(saveMsg, "Couleur requise.", "bad");
+    return;
+  }
+  if(!["MC","ML"].includes(manchesSelected)){
+    setMsg(saveMsg, "Manches invalides (MC/ML).", "bad");
+    return;
+  }
+
+  const { total, tailles } = calcTotal();
+  if(total <= 0){
+    setMsg(saveMsg, "Aucune quantité saisie. (Total = 0)", "warn");
+    return;
+  }
+
+  const payload = {
+    carton_code: carton_code || null,
+    designation: designation || null,
+    ref,
+    grammage: grammage || null,
+    couleur,
+    manches: manchesSelected,
+    tailles_json: tailles,
+    total_carton: total,
+    counted_by: session.name
+  };
+
+  const { error } = await db.from("inventory_counts").insert(payload);
+
+  if(error){
+    setMsg(saveMsg, "Erreur DB (insertion).", "bad");
+    console.error(error);
+    return;
+  }
+
+  setMsg(saveMsg, "✅ Carton enregistré en base.", "ok");
+  clearForm();
+  refreshStock();
+}
+
+btnSave.addEventListener("click", saveCarton);
+
+function clearForm(){
+  f_designation.value = "";
+  f_ref.value = "";
+  f_grammage.value = "";
+  f_couleur.value = "";
+  f_carton.value = "";
+  setManches("MC");
+
+  const ids = ["q_xs","q_s","q_m","q_l","q_xl","q_xxl","q_3xl","q_4xl","q_5xl","q_6xl","q_7xl","q_8xl"];
+  ids.forEach(id => $(id).value = "");
+  totalCartonEl.textContent = "0";
+}
+
+/***********************
+ * STOCK VIEW
+ ***********************/
+async function refreshStock(){
+  setMsg(stockMsg, "Chargement...", "");
+  stockTableBody.innerHTML = "";
+
+  let q = db.from("stock_total").select("*").limit(500);
+
+  const r = normalizeRef(filterRef.value || "");
+  if(r) q = q.ilike("ref", `%${r}%`);
+
+  const c = (filterCouleur.value || "").trim();
+  if(c) q = q.ilike("couleur", `%${c}%`);
+
+  const m = filterManches.value;
+  if(m) q = q.eq("manches", m);
+
+  const { data, error } = await q;
+
+  if(error){
+    setMsg(stockMsg, "Erreur DB (lecture stock_total).", "bad");
+    console.error(error);
+    return;
+  }
+
+  if(!data || data.length === 0){
+    setMsg(stockMsg, "Aucune ligne.", "warn");
+    return;
+  }
+
+  for(const row of data){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="mono">${row.ref || ""}</span></td>
+      <td>${row.couleur || ""}</td>
+      <td><strong>${row.manches || ""}</strong></td>
+      <td><strong>${row.taille || ""}</strong></td>
+      <td><strong>${row.qte ?? ""}</strong></td>
+    `;
+    stockTableBody.appendChild(tr);
+  }
+
+  setMsg(stockMsg, `✅ ${data.length} lignes`, "ok");
+}
+
+btnRefresh.addEventListener("click", refreshStock);
+
+/***********************
+ * EXPORT CSV (stock_total)
+ ***********************/
+function toCsv(rows){
+  const headers = ["ref","couleur","manches","taille","qte"];
+  const escape = (v) => {
+    const s = (v ?? "").toString();
+    if(s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replaceAll('"','""')}"`;
+    return s;
+  };
+  const lines = [
+    headers.join(","),
+    ...rows.map(r => headers.map(h => escape(r[h])).join(","))
+  ];
+  return lines.join("\n");
+}
+
+btnExportCsv.addEventListener("click", async () => {
+  setMsg(stockMsg, "Export en cours...", "");
+  let q = db.from("stock_total").select("*").limit(2000);
+
+  const r = normalizeRef(filterRef.value || "");
+  if(r) q = q.ilike("ref", `%${r}%`);
+
+  const c = (filterCouleur.value || "").trim();
+  if(c) q = q.ilike("couleur", `%${c}%`);
+
+  const m = filterManches.value;
+  if(m) q = q.eq("manches", m);
+
+  const { data, error } = await q;
+
+  if(error){
+    setMsg(stockMsg, "Erreur export (lecture).", "bad");
+    console.error(error);
+    return;
+  }
+
+  const csv = toCsv(data || []);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `stock_total_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  setMsg(stockMsg, "✅ CSV généré.", "ok");
+});
+
+/***********************
+ * BOOT
+ ***********************/
+(function boot(){
+  // petite touche mono
+  const style = document.createElement("style");
+  style.textContent = `.mono{font-family: var(--mono); font-size: 13px;}`;
+  document.head.appendChild(style);
+
+  const session = getSession();
+  if(session?.name){
+    showApp(session.name);
+  } else {
+    showLogin();
+  }
+})();
