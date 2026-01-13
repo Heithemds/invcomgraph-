@@ -1,314 +1,270 @@
-// ============================
-// 1) CONFIG SUPABASE (à remplir)
-// ============================
-// ⚠️ Mets ici ton URL et ta clé "anon (public)" (Supabase → Project Settings → API)
-const SUPABASE_URL = "https://pzagcexmeqwfznxskmxu.supabase.co";      // ex: https://xxxx.supabase.co
-const SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
+/* =========================
+   CONFIG SUPABASE (A REMPLACER)
+   ========================= */
+const SUPABASE_URL = "https://TONPROJET.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6YWdjZXhtZXF3ZnpueHNrbXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNjAwNzUsImV4cCI6MjA4MzgzNjA3NX0.tDwHz-sgowrbifeAZr3UItwn3Ue-B4d9wifXP4oisLY";
 
-let sb = null;
-let currentUser = null;
+/* =========================
+   INIT
+   ========================= */
+let supabase;
+try {
+  supabase = window.supabase.createClient(SUPABASE_URL.trim(), SUPABASE_ANON_KEY.trim());
+} catch (e) {
+  console.error(e);
+  alert("Supabase init failed: " + e.message);
+}
 
-const SIZES = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
-
+/* =========================
+   UI HELPERS
+   ========================= */
 const $ = (id) => document.getElementById(id);
 
-function toast(msg, type="ok"){
-  const t = $("toast");
-  t.textContent = msg;
-  t.className = `toast ${type}`;
-  t.classList.remove("hidden");
-  clearTimeout(toast._tm);
-  toast._tm = setTimeout(()=>t.classList.add("hidden"), 2400);
+function setMsg(el, text, type) {
+  el.classList.remove("ok", "err");
+  if (type) el.classList.add(type);
+  el.textContent = text || "";
 }
 
-function setHint(id, msg, type=""){
-  const el = $(id);
-  el.textContent = msg || "";
-  el.className = `hint ${type}`.trim();
+function normalizeName(name) {
+  return (name || "").trim();
 }
 
-function normalizeSpaces(s){
-  return String(s||"").trim().replace(/\s+/g," ");
+function isPin6(pin) {
+  return /^\d{6}$/.test((pin || "").trim());
 }
 
-// règle métier: I = 1
-function normalizeRef(ref){
-  return normalizeSpaces(ref).toUpperCase().replace(/I/g, "1");
+async function sha256(str) {
+  const buf = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2,"0")).join("");
 }
 
-function toIntOrZero(v){
-  if(v === null || v === undefined) return 0;
-  const s = String(v).trim();
-  if(!s) return 0;
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) ? n : 0;
+/* =========================
+   SESSION LOCAL
+   ========================= */
+function setSessionUser(name) {
+  localStorage.setItem("inv_user", name);
+  $("whoami").textContent = `Connecté: ${name}`;
+  $("btnLogout").hidden = false;
 }
 
-function loadSession(){
-  try{
-    const raw = localStorage.getItem("inv_session");
-    if(!raw) return null;
-    return JSON.parse(raw);
-  }catch{ return null; }
+function clearSessionUser() {
+  localStorage.removeItem("inv_user");
+  $("whoami").textContent = "Non connecté";
+  $("btnLogout").hidden = true;
 }
 
-function saveSession(user){
-  localStorage.setItem("inv_session", JSON.stringify({
-    name:user.name,
-    id:user.id,
-    ts: Date.now()
-  }));
+function getSessionUser() {
+  return localStorage.getItem("inv_user");
 }
 
-function clearSession(){
-  localStorage.removeItem("inv_session");
-}
+/* =========================
+   DIAGNOSTICS
+   ========================= */
+async function runDiagnostics() {
+  const out = $("diagOut");
+  const diag = [];
+  diag.push("URL: " + SUPABASE_URL);
+  diag.push("Anon key length: " + (SUPABASE_ANON_KEY || "").length);
 
-function pushLocalHistory(entry){
-  const key = "inv_local_history";
-  const list = JSON.parse(localStorage.getItem(key) || "[]");
-  list.unshift({ ...entry, ts: Date.now() });
-  localStorage.setItem(key, JSON.stringify(list.slice(0, 60)));
-  renderLocalHistory();
-}
-
-function renderLocalHistory(){
-  const key = "inv_local_history";
-  const list = JSON.parse(localStorage.getItem(key) || "[]");
-  const box = $("localHistory");
-  if(!list.length){
-    box.innerHTML = `<div class="item">Aucun enregistrement local.</div>`;
-    return;
+  // test select
+  try {
+    const { data, error } = await supabase.from("app_users").select("id").limit(1);
+    if (error) diag.push("DB test: ERROR -> " + error.message);
+    else diag.push("DB test: OK -> rows " + (data?.length ?? 0));
+  } catch (e) {
+    diag.push("DB test: EXCEPTION -> " + e.message);
   }
-  box.innerHTML = list.map(x=>{
-    const d = new Date(x.ts);
-    const t = d.toLocaleString();
-    return `<div class="item"><b>${x.ref}</b> • ${x.couleur} • ${x.manches} • total ${x.total} • <span>${t}</span></div>`;
-  }).join("");
+
+  out.textContent = diag.join("\n");
 }
 
-function showApp(){
-  $("cardLogin").classList.add("hidden");
-  $("cardApp").classList.remove("hidden");
-  $("btnLogout").classList.remove("hidden");
-  $("whoami").textContent = currentUser?.name || "—";
-  renderLocalHistory();
+/* =========================
+   AUTH - REGISTER / LOGIN
+   ========================= */
+async function registerUser() {
+  const msg = $("authMsg");
+  setMsg(msg, "", null);
+
+  const name = normalizeName($("name").value);
+  const pin = $("pin").value.trim();
+  const pin2 = $("pin2").value.trim();
+
+  if (!name) return setMsg(msg, "Nom obligatoire.", "err");
+  if (!isPin6(pin)) return setMsg(msg, "PIN invalide : 6 chiffres obligatoires.", "err");
+  if (pin2 !== pin) return setMsg(msg, "Confirmation PIN incorrecte.", "err");
+
+  // check existing
+  const { data: existing, error: e1 } = await supabase
+    .from("app_users")
+    .select("id")
+    .eq("name", name)
+    .maybeSingle();
+
+  if (e1) return setMsg(msg, "Erreur DB: " + e1.message, "err");
+  if (existing) return setMsg(msg, "Ce nom existe déjà. Utilise 'Se connecter'.", "err");
+
+  const pin_hash = await sha256(pin);
+
+  const { error: e2 } = await supabase
+    .from("app_users")
+    .insert([{ name, pin_hash }]);
+
+  if (e2) return setMsg(msg, "Inscription impossible: " + e2.message, "err");
+
+  setSessionUser(name);
+  setMsg(msg, "Inscription OK ✅ Connecté.", "ok");
 }
 
-function showLogin(){
-  $("cardApp").classList.add("hidden");
-  $("cardLogin").classList.remove("hidden");
-  $("btnLogout").classList.add("hidden");
+async function loginUser() {
+  const msg = $("authMsg");
+  setMsg(msg, "", null);
+
+  const name = normalizeName($("name").value);
+  const pin = $("pin").value.trim();
+
+  if (!name) return setMsg(msg, "Nom obligatoire.", "err");
+  if (!isPin6(pin)) return setMsg(msg, "PIN invalide : 6 chiffres obligatoires.", "err");
+
+  const { data: user, error: e1 } = await supabase
+    .from("app_users")
+    .select("id, pin_hash")
+    .eq("name", name)
+    .maybeSingle();
+
+  if (e1) return setMsg(msg, "Erreur DB: " + e1.message, "err");
+  if (!user) return setMsg(msg, "Nom inconnu. Clique 'S’inscrire'.", "err");
+
+  const ok = user.pin_hash === (await sha256(pin));
+  if (!ok) return setMsg(msg, "PIN incorrect.", "err");
+
+  setSessionUser(name);
+  setMsg(msg, "Connexion OK ✅", "ok");
 }
 
-function bindManches(){
-  const btns = [...document.querySelectorAll(".segbtn")];
-  btns.forEach(b=>{
-    b.addEventListener("click", ()=>{
-      btns.forEach(x=>x.classList.remove("active"));
-      b.classList.add("active");
-      $("manches").value = b.dataset.manches;
-    });
-  });
+/* =========================
+   INVENTORY FORM
+   ========================= */
+let manches = "MC";
+
+function setManches(v) {
+  manches = v;
+  $("mMC").classList.toggle("active", v === "MC");
+  $("mML").classList.toggle("active", v === "ML");
 }
 
-function readTaillesJson(){
-  const obj = {};
-  for(const s of SIZES){
-    const v = toIntOrZero($(`t_${s}`).value);
-    if(v > 0) obj[s] = v;
-  }
-  return obj;
-}
-
-function calcTotal(){
-  const t = readTaillesJson();
+function computeTotal() {
+  const ids = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
   let total = 0;
-  for(const k in t) total += t[k];
+  for (const id of ids) {
+    const n = parseInt($(id).value || "0", 10);
+    if (!Number.isNaN(n) && n > 0) total += n;
+  }
   $("totalCarton").textContent = String(total);
   return total;
 }
 
-// ============================
-// 2) DB: LOGIN / CREATE USER
-// ============================
-
-async function loginOrCreate(name, pin, pin2){
-  const n = normalizeSpaces(name);
-  const p = String(pin||"").trim();
-  const p2 = String(pin2||"").trim();
-
-  if(!n) throw new Error("Nom requis.");
-  if(!/^\d{6}$/.test(p)) throw new Error("PIN doit être 6 chiffres.");
-
-  const { data: existing, error: e1 } = await sb
-    .from("app_users")
-    .select("*")
-    .eq("name", n)
-    .limit(1);
-
-  if(e1) throw e1;
-
-  // utilisateur existe -> connexion
-  if(existing && existing.length){
-    const user = existing[0];
-    if(String(user.pin) !== p) throw new Error("PIN incorrect.");
-    return user;
+function collectTaillesJson() {
+  const ids = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"];
+  const obj = {};
+  for (const id of ids) {
+    const v = ($(id).value || "").trim();
+    if (v !== "" && v !== "0") obj[id] = v; // stocke uniquement ce qui est présent
   }
-
-  // utilisateur nouveau -> confirmation obligatoire
-  if(!/^\d{6}$/.test(p2)) throw new Error("Confirme le PIN (6 chiffres) pour créer le nouvel utilisateur.");
-  if(p !== p2) throw new Error("PIN et confirmation ne correspondent pas.");
-
-  const { data: created, error: e2 } = await sb
-    .from("app_users")
-    .insert({ name: n, pin: p })
-    .select()
-    .single();
-
-  if(e2) throw e2;
-  return created;
+  return obj;
 }
 
-// ============================
-// 3) DB: INSERT INVENTORY COUNT
-// ============================
-
-async function insertInventoryCount(payload){
-  const { data, error } = await sb
-    .from("inventory_counts")
-    .insert(payload)
-    .select()
-    .single();
-
-  if(error) throw error;
-  return data;
+function normalizeRef(ref) {
+  // règle: accepte I comme 1 (si quelqu’un écrit E19I -> E191)
+  // et met en MAJ
+  return (ref || "")
+    .trim()
+    .toUpperCase()
+    .replace(/I/g, "1");
 }
 
-// ============================
-// 4) INIT
-// ============================
+async function sendInventory() {
+  const invMsg = $("invMsg");
+  setMsg(invMsg, "", null);
 
-function initSupabase(){
-  if(!SUPABASE_URL || !SUPABASE_ANON_KEY ||
-     SUPABASE_URL.includes("COLLE_ICI") || SUPABASE_ANON_KEY.includes("COLLE_ICI")){
-    setHint("loginHint", "Configure d’abord SUPABASE_URL + SUPABASE_ANON_KEY dans app.js", "bad");
-    return false;
-  }
-  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return true;
+  const user = getSessionUser();
+  if (!user) return setMsg(invMsg, "Tu dois te connecter avant d’envoyer.", "err");
+
+  const designation = ($("designation").value || "").trim();
+  const grammage = ($("grammage").value || "").trim();
+  const ref = normalizeRef($("ref").value);
+  const couleur = ($("couleur").value || "").trim();
+  const carton_code = ($("carton_code").value || "").trim();
+
+  if (!designation) return setMsg(invMsg, "Désignation obligatoire.", "err");
+  if (!ref) return setMsg(invMsg, "Référence obligatoire.", "err");
+  if (!couleur) return setMsg(invMsg, "Couleur obligatoire.", "err");
+  if (!["MC","ML"].includes(manches)) return setMsg(invMsg, "Manches: MC ou ML seulement.", "err");
+
+  const tailles_json = collectTaillesJson();
+  const total = computeTotal();
+  if (total <= 0) return setMsg(invMsg, "Aucune quantité saisie.", "err");
+
+  // Insert record
+  const payload = {
+    designation,
+    grammage: grammage || null,
+    ref,
+    couleur,
+    manches,
+    carton_code: carton_code || null,
+    tailles_json,
+    total_carton: total,
+    counted_by: user
+  };
+
+  const { error } = await supabase.from("inventory_counts").insert([payload]);
+  if (error) return setMsg(invMsg, "Envoi impossible: " + error.message, "err");
+
+  setMsg(invMsg, "Enregistré ✅ (base centralisée).", "ok");
+
+  // reset quantités pour aller vite
+  ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"].forEach(id => $(id).value = "");
+  computeTotal();
 }
 
-function clearForm(){
-  $("designation").value = "";
-  $("ref").value = "";
-  $("grammage").value = "";
-  $("couleur").value = "";
-  $("carton_code").value = "";
-  $("manches").value = "";
-  document.querySelectorAll(".segbtn").forEach(b=>b.classList.remove("active"));
-  for(const s of SIZES) $(`t_${s}`).value = "";
-  $("totalCarton").textContent = "0";
+/* =========================
+   BOOT
+   ========================= */
+function wire() {
+  // Auth buttons
+  $("btnRegister").addEventListener("click", registerUser);
+  $("btnLogin").addEventListener("click", loginUser);
+  $("btnLogout").addEventListener("click", () => {
+    clearSessionUser();
+    setMsg($("authMsg"), "Déconnecté.", "ok");
+  });
+
+  // Manches
+  $("mMC").addEventListener("click", () => setManches("MC"));
+  $("mML").addEventListener("click", () => setManches("ML"));
+
+  // Totals
+  $("btnCalc").addEventListener("click", computeTotal);
+  $("btnSend").addEventListener("click", sendInventory);
+
+  // Auto total recalcul
+  ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"].forEach(id => {
+    $(id).addEventListener("input", computeTotal);
+  });
+
+  // Diagnostics open
+  document.querySelector(".diag").addEventListener("toggle", (e) => {
+    if (e.target.open) runDiagnostics();
+  });
+
+  // Restore session
+  const saved = getSessionUser();
+  if (saved) setSessionUser(saved);
+
+  setManches("MC");
+  computeTotal();
 }
 
-document.addEventListener("DOMContentLoaded", async ()=>{
-  bindManches();
-
-  // boutons
-  $("btnCalc").addEventListener("click", ()=>{
-    calcTotal();
-    toast("Total calculé", "ok");
-  });
-
-  $("btnLogout").addEventListener("click", ()=>{
-    currentUser = null;
-    clearSession();
-    showLogin();
-    toast("Déconnecté", "ok");
-  });
-
-  $("btnLogin").addEventListener("click", async ()=>{
-    try{
-      setHint("loginHint","");
-      setHint("appHint","");
-
-      if(!initSupabase()) return;
-
-      const name = $("loginName").value;
-      const pin = $("loginPin").value;
-      const pin2 = $("loginPin2").value;
-
-      const user = await loginOrCreate(name, pin, pin2);
-      currentUser = user;
-      saveSession(user);
-
-      showApp();
-      toast(`Connecté: ${user.name}`, "ok");
-    }catch(e){
-      setHint("loginHint", e?.message || String(e), "bad");
-      toast(e?.message || "Erreur", "bad");
-    }
-  });
-
-  $("btnSend").addEventListener("click", async ()=>{
-    try{
-      setHint("appHint","");
-
-      if(!sb) {
-        if(!initSupabase()) return;
-      }
-      if(!currentUser){
-        throw new Error("Non connecté.");
-      }
-
-      const designation = normalizeSpaces($("designation").value);
-      const ref = normalizeRef($("ref").value);
-      const grammage = toIntOrZero($("grammage").value);
-      const couleur = normalizeSpaces($("couleur").value);
-      const manches = normalizeSpaces($("manches").value).toUpperCase();
-      const carton_code = normalizeSpaces($("carton_code").value);
-
-      if(!designation) throw new Error("Désignation requise.");
-      if(!ref) throw new Error("Référence requise.");
-      if(!couleur) throw new Error("Couleur requise.");
-      if(!(manches === "MC" || manches === "ML")) throw new Error("Manches: choisir MC ou ML.");
-
-      const tailles_json = readTaillesJson();
-      const total = calcTotal();
-      if(total <= 0) throw new Error("Quantités: total doit être > 0.");
-
-      // Payload DB
-      const payload = {
-        carton_code: carton_code || null,
-        designation,
-        ref,
-        grammage: grammage || null,
-        couleur,
-        manches,
-        tailles_json,
-        counted_by: currentUser.name
-      };
-
-      await insertInventoryCount(payload);
-
-      pushLocalHistory({ ref, couleur, manches, total });
-      toast("Enregistré en base ✅", "ok");
-      clearForm();
-
-    }catch(e){
-      setHint("appHint", e?.message || String(e), "bad");
-      toast(e?.message || "Erreur", "bad");
-    }
-  });
-
-  // auto session
-  const sess = loadSession();
-  if(sess){
-    // session locale: on affiche l’app directement, le nom suffit côté UI
-    // (la vraie vérif PIN se fait uniquement à la connexion)
-    currentUser = { name: sess.name, id: sess.id };
-    showApp();
-  }else{
-    showLogin();
-  }
-});
+wire();
